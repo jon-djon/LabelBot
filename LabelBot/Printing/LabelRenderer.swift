@@ -47,11 +47,18 @@ enum LabelRenderer {
     static let reverseLength = false   // reverse the feed order of columns
     static let flipAcross = false      // mirror across the tape width
 
+    /// Print resolution along the tape feed, used to convert a length in mm to dots.
+    static let dotsPerMM = 180.0 / 25.4
+
     static func render(text: String, tape: TapeSize,
                        category: FastenerCategory = .screwBolt,
                        drive: DriveType = .none, head: HeadType = .none,
                        threadKind: ThreadKind = .machine,
-                       source: IconSource = .drawn, fontName: String? = nil) -> RenderedLabel {
+                       source: IconSource = .drawn, showIcons: Bool = true,
+                       screwOrientation: ScrewOrientation = .vertical,
+                       fixedLengthDots: Int? = nil,
+                       alignment: LabelAlignment = .center,
+                       fontName: String? = nil) -> RenderedLabel {
         let pins = tape.printablePins
         let verticalPadding = 2
         let contentHeight = max(1, pins - 2 * verticalPadding)
@@ -74,16 +81,19 @@ enum LabelRenderer {
         let iconSide = CGFloat(height)
         let iconGap: CGFloat = 8
         let horizontalPadding = 8
-        // Which icons to draw, left-to-right, depending on category.
+        // Which icons to draw, left-to-right, depending on category (unless icons off).
         var iconDraws: [(CGContext, CGRect) -> Void] = []
         switch category {
+        case _ where !showIcons:
+            break
         case .screwBolt:
             if head != .none {
                 iconDraws.append { c, r in
                     if source == .imported, let image = IconRenderer.importedImage(stem: "head-\(head.rawValue)") {
                         IconRenderer.drawImage(image, into: c, rect: r)
                     } else {
-                        IconRenderer.drawHead(head, threadKind: threadKind, into: c, rect: r)
+                        IconRenderer.drawHead(head, threadKind: threadKind,
+                                              orientation: screwOrientation, into: c, rect: r)
                     }
                 }
             }
@@ -117,7 +127,17 @@ enum LabelRenderer {
         let iconCount = iconDraws.count
         let iconsWidth = CGFloat(iconCount) * (iconSide + iconGap)
 
-        let width = max(1, horizontalPadding + Int(ceil(iconsWidth)) + Int(ceil(textWidth)) + horizontalPadding)
+        // Natural width from content, then grow to a fixed length if requested.
+        let contentWidth = max(1, horizontalPadding + Int(ceil(iconsWidth)) + Int(ceil(textWidth)) + horizontalPadding)
+        let width = max(contentWidth, fixedLengthDots ?? 0)
+        let slack = CGFloat(width - contentWidth)
+        let alignOffset: CGFloat = {
+            switch alignment {
+            case .leading: return 0
+            case .center: return slack / 2
+            case .trailing: return slack
+            }
+        }()
 
         let grayscale = CGColorSpaceCreateDeviceGray()
         guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
@@ -147,13 +167,13 @@ enum LabelRenderer {
             IconRenderer.drawImage(image, into: ctx, rect: rect)
         }
 
-        var iconX = CGFloat(horizontalPadding)
+        var iconX = CGFloat(horizontalPadding) + alignOffset
         for draw in iconDraws {
             placeIcon(cellX: iconX, draw: draw)
             iconX += iconSide + iconGap
         }
 
-        let textX = CGFloat(horizontalPadding) + iconsWidth
+        let textX = CGFloat(horizontalPadding) + alignOffset + iconsWidth
         let baseline = (CGFloat(height) - (ascent + descent)) / 2 + descent
         ctx.textPosition = CGPoint(x: textX, y: baseline)
         CTLineDraw(line, ctx)

@@ -89,6 +89,42 @@ enum SizeEntryMode: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
+/// Horizontal alignment of the label content (icons + text) within the tape length.
+enum LabelAlignment: String, CaseIterable, Identifiable, Sendable {
+    case leading = "Left"
+    case center = "Center"
+    case trailing = "Right"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .leading: "text.alignleft"
+        case .center: "text.aligncenter"
+        case .trailing: "text.alignright"
+        }
+    }
+}
+
+/// Fixed print lengths (mm) offered alongside the "Auto" (fit-to-content) option.
+enum LabelLength {
+    static let presetsMM = [15, 20, 25, 30, 40, 50, 60, 80, 100]
+    static let auto = 0   // sentinel: size to content
+}
+
+/// Orientation of the screw side-profile (head) icon.
+enum ScrewOrientation: String, CaseIterable, Identifiable, Sendable {
+    case vertical = "Vertical"
+    case horizontal = "Horizontal"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .vertical: "arrow.up.and.down"
+        case .horizontal: "arrow.left.and.right"
+        }
+    }
+}
+
 /// Standard fastener sizes for the guided pickers.
 enum SizeTables {
     static let metricDiameters = ["M1.6", "M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12"]

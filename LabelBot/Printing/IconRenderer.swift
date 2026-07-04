@@ -70,7 +70,18 @@ enum IconRenderer {
 
     // MARK: - Head icons (side profile)
 
-    static func drawHead(_ type: HeadType, threadKind: ThreadKind = .machine, into ctx: CGContext, rect: CGRect) {
+    static func drawHead(_ type: HeadType, threadKind: ThreadKind = .machine,
+                         orientation: ScrewOrientation = .vertical,
+                         into ctx: CGContext, rect: CGRect) {
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        // Horizontal: rotate the whole profile 90° about the cell center so the
+        // head lies on the left and the tip points right.
+        if orientation == .horizontal {
+            ctx.translateBy(x: rect.midX, y: rect.midY)
+            ctx.rotate(by: .pi / 2)
+            ctx.translateBy(x: -rect.midX, y: -rect.midY)
+        }
         ctx.setFillColor(gray: 0, alpha: 1)
         let cx = rect.midX
         let bottom = rect.minY

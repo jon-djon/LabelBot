@@ -28,16 +28,20 @@ final class PrinterManager {
 
     // Label composition.
     var tape: TapeSize = .tape24 { didSet { updatePreview() } }
+    var lengthMM: Int = LabelLength.auto { didSet { updatePreview() } }   // 0 = auto/fit
+    var alignment: LabelAlignment = .center { didSet { updatePreview() } }
     var category: FastenerCategory = .screwBolt { didSet { updatePreview() } }
     var drive: DriveType = .hex { didSet { updatePreview() } }
     var head: HeadType = .pan { didSet { updatePreview() } }
     var threadKind: ThreadKind = .machine { didSet { updatePreview() } }
+    var screwOrientation: ScrewOrientation = .vertical { didSet { updatePreview() } }
     var unit: UnitSystem = .metric { didSet { unitChanged() } }
     var sizeMode: SizeEntryMode = .pickers { didSet { updatePreview() } }
     var diameter = SizeTables.metricDiameters[3] { didSet { updatePreview() } }   // M3
     var length = SizeTables.metricLengths[3] { didSet { updatePreview() } }       // 8
     var sizeText = "M3 × 8" { didSet { updatePreview() } }
     var customText = "" { didSet { updatePreview() } }
+    var showIcons = true { didSet { updatePreview() } }
     var iconSource: IconSource = .drawn { didSet { updatePreview() } }
     private(set) var preview: NSImage?
 
@@ -74,8 +78,14 @@ final class PrinterManager {
     }
 
     private func renderLabel() -> RenderedLabel {
-        LabelRenderer.render(text: labelText, tape: tape, category: category,
-                             drive: drive, head: head, threadKind: threadKind, source: iconSource)
+        let fixedLengthDots = lengthMM > 0
+            ? Int((Double(lengthMM) * LabelRenderer.dotsPerMM).rounded())
+            : nil
+        return LabelRenderer.render(text: labelText, tape: tape, category: category,
+                                    drive: drive, head: head, threadKind: threadKind,
+                                    source: iconSource, showIcons: showIcons,
+                                    screwOrientation: screwOrientation,
+                                    fixedLengthDots: fixedLengthDots, alignment: alignment)
     }
 
     func updatePreview() {
