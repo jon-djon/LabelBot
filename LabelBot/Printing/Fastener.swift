@@ -1,0 +1,98 @@
+//
+//  Fastener.swift
+//  LabelBot
+//
+//  Drive and head types for screw/bolt labels, matching the common set on
+//  Gridfinity label tools.
+//
+
+import Foundation
+
+enum DriveType: String, CaseIterable, Identifiable, Sendable {
+    case none, hex, torx, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .none: "None"
+        case .hex: "Hex / Allen"
+        case .torx: "Torx"
+        case .securityTorx: "Security Torx"
+        case .phillips: "Phillips"
+        case .pozidriv: "Pozidriv"
+        case .robertson: "Robertson"
+        case .slotted: "Slotted"
+        case .externalHex: "External Hex"
+        }
+    }
+}
+
+enum HeadType: String, CaseIterable, Identifiable, Sendable {
+    case none, countersunk, socketCap, pan, button, hex, flangeHex, grub
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .none: "None"
+        case .countersunk: "Countersunk"
+        case .socketCap: "Socket Cap"
+        case .pan: "Pan"
+        case .button: "Button"
+        case .hex: "Hex"
+        case .flangeHex: "Flange Hex"
+        case .grub: "Grub / Set"
+        }
+    }
+}
+
+extension HeadType {
+    /// Head styles offered for wood screws (always have a head).
+    static let woodHeads: [HeadType] = [.countersunk, .pan, .button, .hex]
+}
+
+/// Where icon artwork comes from.
+enum IconSource: String, CaseIterable, Identifiable, Sendable {
+    case drawn = "Drawn"       // our own vector icons
+    case imported = "Imported" // image files dropped into the icons folder
+
+    var id: String { rawValue }
+}
+
+/// Top-level kind of fastener being labeled.
+enum FastenerCategory: String, CaseIterable, Identifiable, Sendable {
+    case screwBolt = "Screws / Bolts"
+    case nutWasher = "Nuts & Washers"
+    case insert = "Threaded Inserts"
+
+    var id: String { rawValue }
+    /// Whether drive / head / thread options apply.
+    var isScrew: Bool { self == .screwBolt }
+}
+
+/// Screw thread style (affects the shaft profile).
+enum ThreadKind: String, CaseIterable, Identifiable, Sendable {
+    case machine = "Machine"
+    case wood = "Wood"
+    var id: String { rawValue }
+}
+
+enum UnitSystem: String, CaseIterable, Identifiable, Sendable {
+    case metric = "Metric"
+    case imperial = "Imperial"
+    var id: String { rawValue }
+}
+
+/// How the size is chosen: guided dropdowns or free text.
+enum SizeEntryMode: String, CaseIterable, Identifiable, Sendable {
+    case pickers = "Pickers"
+    case text = "Text"
+    var id: String { rawValue }
+}
+
+/// Standard fastener sizes for the guided pickers.
+enum SizeTables {
+    static let metricDiameters = ["M1.6", "M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12"]
+    static let imperialDiameters = ["#2", "#4", "#6", "#8", "#10", "#12", "1/4\"", "5/16\"", "3/8\"", "1/2\""]
+    static let metricLengths = ["4", "5", "6", "8", "10", "12", "16", "20", "25", "30", "40", "50"]
+    static let imperialLengths = ["1/4\"", "3/8\"", "1/2\"", "5/8\"", "3/4\"", "1\"", "1-1/4\"", "1-1/2\"", "2\""]
+}

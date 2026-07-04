@@ -13,5 +13,6 @@ struct LabelBotApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowToolbarStyle(.unified)
     }
 }

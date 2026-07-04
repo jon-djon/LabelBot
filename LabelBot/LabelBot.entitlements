@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sandbox disabled: seizing a printer-class USB interface is not permitted
+	     for a sandboxed app even with com.apple.security.device.usb. This is a
+	     personal tool, so we run unsandboxed. Re-enable for Mac App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
