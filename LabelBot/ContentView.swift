@@ -7,7 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var printer = PrinterManager()
-    @State private var showLogs = true
+    @State private var showLogs = false
 
     var body: some View {
         VSplitView {
