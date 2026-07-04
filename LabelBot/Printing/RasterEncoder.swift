@@ -148,4 +148,8 @@ nonisolated enum RasterEncoder {
 
     /// Status-request command (ESC i S) — asks for a 32-byte status reply.
     static var statusRequest: Data { Data([0x1B, 0x69, 0x53]) }
+
+    /// Invalidate (100 null bytes) + initialize (ESC @). Sent on its own to wake a
+    /// sleeping printer and clear its command buffer before the real job.
+    static var initialize: Data { Data(repeating: 0x00, count: 100) + Data([0x1B, 0x40]) }
 }

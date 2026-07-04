@@ -184,15 +184,47 @@ final class PrinterManager {
             appendLog("Nothing to print")
             return
         }
+        let wake = RasterEncoder.initialize
+        let statusRequest = RasterEncoder.statusRequest
         let payload = RasterEncoder.job(lines: rendered.rasterLines, tapeWidthMM: tape.widthMM)
         do {
-            try await Task.detached { try transport.send(payload) }.value
+            // Wake the printer and let it reach the ready state before sending the job.
+            // A cold (just-connected) printer otherwise drops the first job silently.
+            let status = try await Task.detached { () -> Data in
+                try transport.send(wake)
+                try transport.send(statusRequest)
+                let reply = (try? transport.readStatus(maxLength: 32, timeout: 3)) ?? Data()
+                Thread.sleep(forTimeInterval: 0.2)   // settle time after waking
+                try transport.send(payload)
+                return reply
+            }.value
+            if let issue = Self.statusError(status) {
+                appendLog("Printer reported: \(issue)")
+            }
             appendLog("Printed \"\(labelText)\" — \(rendered.lengthDots) dots long, \(tape.label) (\(payload.count) B)")
             statusText = "Printed label"
         } catch {
             appendLog("Print error: \(error.localizedDescription)")
             statusText = "Print failed"
         }
+    }
+
+    /// Decodes the error bytes (offsets 8–9) of a 32-byte status reply, if any.
+    private static func statusError(_ status: Data) -> String? {
+        guard status.count >= 10 else { return nil }
+        let e1 = status[status.startIndex + 8]
+        let e2 = status[status.startIndex + 9]
+        guard e1 != 0 || e2 != 0 else { return nil }
+        var reasons: [String] = []
+        if e1 & 0x01 != 0 { reasons.append("no media") }
+        if e1 & 0x04 != 0 { reasons.append("cut jam") }
+        if e1 & 0x08 != 0 { reasons.append("weak batteries") }
+        if e1 & 0x40 != 0 { reasons.append("high voltage adapter") }
+        if e2 & 0x01 != 0 { reasons.append("wrong media") }
+        if e2 & 0x10 != 0 { reasons.append("cover open") }
+        if e2 & 0x20 != 0 { reasons.append("overheated") }
+        if reasons.isEmpty { reasons.append(String(format: "error 0x%02X 0x%02X", e1, e2)) }
+        return reasons.joined(separator: ", ")
     }
 
     func disconnect() {
