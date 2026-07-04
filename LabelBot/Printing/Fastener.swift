@@ -50,14 +50,6 @@ extension HeadType {
     static let woodHeads: [HeadType] = [.countersunk, .pan, .button, .hex]
 }
 
-/// Where icon artwork comes from.
-enum IconSource: String, CaseIterable, Identifiable, Sendable {
-    case drawn = "Drawn"       // our own vector icons
-    case imported = "Imported" // image files dropped into the icons folder
-
-    var id: String { rawValue }
-}
-
 /// Top-level kind of fastener being labeled.
 enum FastenerCategory: String, CaseIterable, Identifiable, Sendable {
     case screwBolt = "Screws / Bolts"

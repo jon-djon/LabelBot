@@ -429,31 +429,7 @@ enum IconRenderer {
         }
     }
 
-    // MARK: - Imported images
-
-    /// Directory the user drops icon files into (png / pdf / svg), named e.g.
-    /// `drive-hex.png` or `head-pan.png`.
-    static var importDirectory: URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LabelBot/Icons", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
-
-    /// Loads an imported icon by file stem (without extension), trying common formats.
-    static func importedImage(stem: String) -> CGImage? {
-        for ext in ["svg", "pdf", "png"] {
-            let url = importDirectory.appendingPathComponent("\(stem).\(ext)")
-            guard FileManager.default.fileExists(atPath: url.path),
-                  let image = NSImage(contentsOf: url) else { continue }
-            var rect = CGRect(origin: .zero, size: image.size)
-            if let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) {
-                return cg
-            }
-        }
-        return nil
-    }
+    // MARK: - Image placement
 
     /// Draws a CGImage into the bottom-up context, flipped so its top stays up.
     static func drawImage(_ image: CGImage, into ctx: CGContext, rect: CGRect) {

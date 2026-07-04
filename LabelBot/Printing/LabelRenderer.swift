@@ -54,7 +54,7 @@ enum LabelRenderer {
                        category: FastenerCategory = .screwBolt,
                        drive: DriveType = .none, head: HeadType = .none,
                        threadKind: ThreadKind = .machine,
-                       source: IconSource = .drawn, showIcons: Bool = true,
+                       showIcons: Bool = true,
                        iconStyle: IconStyle = .simple, threaded: Bool = true,
                        nutWasher: NutWasherType = .hexNut,
                        screwOrientation: ScrewOrientation = .vertical,
@@ -88,7 +88,7 @@ enum LabelRenderer {
         switch category {
         case _ where !showIcons:
             break
-        case .screwBolt where iconStyle == .bolt && source == .drawn:
+        case .screwBolt where iconStyle == .bolt:
             // One integrated bolt with the drive cut into the head.
             if head != .none || drive != .none {
                 iconDraws.append { c, r in
@@ -100,38 +100,22 @@ enum LabelRenderer {
         case .screwBolt:
             if head != .none {
                 iconDraws.append { c, r in
-                    if source == .imported, let image = IconRenderer.importedImage(stem: "head-\(head.rawValue)") {
-                        IconRenderer.drawImage(image, into: c, rect: r)
-                    } else {
-                        IconRenderer.drawHead(head, threadKind: threadKind, threaded: threaded,
-                                              orientation: screwOrientation, into: c, rect: r)
-                    }
+                    IconRenderer.drawHead(head, threadKind: threadKind, threaded: threaded,
+                                          orientation: screwOrientation, into: c, rect: r)
                 }
             }
             if drive != .none {
                 iconDraws.append { c, r in
-                    if source == .imported, let image = IconRenderer.importedImage(stem: "drive-\(drive.rawValue)") {
-                        IconRenderer.drawImage(image, into: c, rect: r)
-                    } else {
-                        IconRenderer.drawDrive(drive, into: c, rect: r)
-                    }
+                    IconRenderer.drawDrive(drive, into: c, rect: r)
                 }
             }
         case .nutWasher:
             iconDraws.append { c, r in
-                if source == .imported, let image = IconRenderer.importedImage(stem: "category-\(nutWasher.rawValue)") {
-                    IconRenderer.drawImage(image, into: c, rect: r)
-                } else {
-                    IconRenderer.drawNutWasher(nutWasher, into: c, rect: r)
-                }
+                IconRenderer.drawNutWasher(nutWasher, into: c, rect: r)
             }
         case .insert:
             iconDraws.append { c, r in
-                if source == .imported, let image = IconRenderer.importedImage(stem: "category-insert") {
-                    IconRenderer.drawImage(image, into: c, rect: r)
-                } else {
-                    IconRenderer.drawInsert(into: c, rect: r)
-                }
+                IconRenderer.drawInsert(into: c, rect: r)
             }
         }
 

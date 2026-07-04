@@ -146,7 +146,7 @@ struct ContentView: View {
         }
     }
 
-    /// Icon on/off, artwork source, and the drive/head pickers (screws only).
+    /// Icon on/off plus the drive/head pickers (screws only).
     private var iconsSection: some View {
         GroupBox("Icons") {
             VStack(alignment: .leading, spacing: 10) {
@@ -154,20 +154,6 @@ struct ContentView: View {
                     .toggleStyle(.switch)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Picker("Icons", selection: $printer.iconSource) {
-                            ForEach(IconSource.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(width: 160)
-                        if printer.iconSource == .imported {
-                            Button("Icons Folder…") { printer.revealIconFolder() }
-                                .controlSize(.small)
-                        }
-                        Spacer()
-                    }
-
                     // Drive + head chosen from icon grids (screws only).
                     if printer.category.isScrew {
                         HStack {

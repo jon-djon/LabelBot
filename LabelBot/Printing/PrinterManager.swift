@@ -45,7 +45,6 @@ final class PrinterManager {
     var sizeText = "M3 × 8" { didSet { updatePreview() } }
     var customText = "" { didSet { updatePreview() } }
     var showIcons = true { didSet { updatePreview() } }
-    var iconSource: IconSource = .drawn { didSet { updatePreview() } }
     private(set) var preview: NSImage?
 
     private var transport: PrinterTransport?
@@ -86,7 +85,7 @@ final class PrinterManager {
             : nil
         return LabelRenderer.render(text: labelText, tape: tape, category: category,
                                     drive: drive, head: head, threadKind: threadKind,
-                                    source: iconSource, showIcons: showIcons,
+                                    showIcons: showIcons,
                                     iconStyle: iconStyle, threaded: threaded,
                                     nutWasher: nutWasher,
                                     screwOrientation: screwOrientation,
@@ -95,13 +94,6 @@ final class PrinterManager {
 
     func updatePreview() {
         preview = renderLabel().preview
-    }
-
-    /// Opens the folder where "Imported" icon files should be placed.
-    func revealIconFolder() {
-        let url = IconRenderer.importDirectory
-        appendLog("Imported icons folder: \(url.path)")
-        NSWorkspace.shared.open(url)
     }
 
     private func appendLog(_ line: String) {
@@ -194,7 +186,7 @@ final class PrinterManager {
                 try transport.send(wake)
                 try transport.send(statusRequest)
                 let reply = (try? transport.readStatus(maxLength: 32, timeout: 3)) ?? Data()
-                Thread.sleep(forTimeInterval: 0.2)   // settle time after waking
+                try await Task.sleep(for: .milliseconds(200))   // settle time after waking
                 try transport.send(payload)
                 return reply
             }.value
