@@ -35,6 +35,9 @@ final class PrinterManager {
     var head: HeadType = .pan { didSet { updatePreview() } }
     var threadKind: ThreadKind = .machine { didSet { updatePreview() } }
     var screwOrientation: ScrewOrientation = .vertical { didSet { updatePreview() } }
+    var iconStyle: IconStyle = .simple { didSet { updatePreview() } }
+    var threaded = true { didSet { updatePreview() } }
+    var nutWasher: NutWasherType = .hexNut { didSet { updatePreview() } }
     var unit: UnitSystem = .metric { didSet { unitChanged() } }
     var sizeMode: SizeEntryMode = .pickers { didSet { updatePreview() } }
     var diameter = SizeTables.metricDiameters[3] { didSet { updatePreview() } }   // M3
@@ -84,6 +87,8 @@ final class PrinterManager {
         return LabelRenderer.render(text: labelText, tape: tape, category: category,
                                     drive: drive, head: head, threadKind: threadKind,
                                     source: iconSource, showIcons: showIcons,
+                                    iconStyle: iconStyle, threaded: threaded,
+                                    nutWasher: nutWasher,
                                     screwOrientation: screwOrientation,
                                     fixedLengthDots: fixedLengthDots, alignment: alignment)
     }

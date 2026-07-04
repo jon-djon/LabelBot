@@ -7,17 +7,27 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var printer = PrinterManager()
+    @State private var showLogs = true
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                previewSection
-                textSection
-                iconsSection
-                logsSection
+        VSplitView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    previewSection
+                    categorySection
+                    textSection
+                    iconsSection
+                }
+                .padding(20)
+                .onAppear { printer.updatePreview() }
             }
-            .padding(20)
-            .onAppear { printer.updatePreview() }
+            .frame(minHeight: 260)
+
+            if showLogs {
+                logsSection
+                    .padding(20)
+                    .frame(minHeight: 140)
+            }
         }
         .frame(minWidth: 640, minHeight: 440)
         .toolbar { connectionToolbar }
@@ -79,17 +89,19 @@ struct ContentView: View {
         }
     }
 
-    /// Everything that makes up the label text: category, size, custom text.
+    /// Top-level fastener category, above the text section.
+    private var categorySection: some View {
+        Picker("Type", selection: $printer.category) {
+            ForEach(FastenerCategory.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    /// Everything that makes up the label text: size + custom text.
     private var textSection: some View {
         GroupBox("Text") {
             VStack(alignment: .leading, spacing: 10) {
-                // Category.
-                Picker("Type", selection: $printer.category) {
-                    ForEach(FastenerCategory.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
                 // Size: unit system + entry mode + the size value itself.
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Size").font(.caption).foregroundStyle(.secondary)
@@ -159,15 +171,13 @@ struct ContentView: View {
                     // Drive + head chosen from icon grids (screws only).
                     if printer.category.isScrew {
                         HStack {
-                            Text("Orientation").font(.caption).foregroundStyle(.secondary)
-                            Picker("Orientation", selection: $printer.screwOrientation) {
-                                ForEach(ScrewOrientation.allCases) { o in
-                                    Image(systemName: o.symbol).tag(o)
-                                }
+                            Text("Style").font(.caption).foregroundStyle(.secondary)
+                            Picker("Style", selection: $printer.iconStyle) {
+                                ForEach(IconStyle.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
-                            .frame(width: 100)
+                            .frame(width: 130)
                             Spacer()
                         }
 
@@ -189,8 +199,8 @@ struct ContentView: View {
                             Text("Machine screws").font(.caption2).foregroundStyle(.secondary)
                             iconRow(HeadType.allCases,
                                     image: { h in
-                                        h == .none ? nil : IconRenderer.swatch(key: "head-\(h.rawValue)-machine") {
-                                            IconRenderer.drawHead(h, threadKind: .machine, into: $0, rect: $1)
+                                        h == .none ? nil : IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.screwOrientation.rawValue)-\(printer.threaded)") {
+                                            IconRenderer.drawHead(h, threadKind: .machine, threaded: printer.threaded, orientation: printer.screwOrientation, into: $0, rect: $1)
                                         }
                                     },
                                     title: { $0.displayName },
@@ -199,13 +209,46 @@ struct ContentView: View {
                             Text("Wood screws").font(.caption2).foregroundStyle(.secondary)
                             iconRow(HeadType.woodHeads,
                                     image: { h in
-                                        IconRenderer.swatch(key: "head-\(h.rawValue)-wood") {
-                                            IconRenderer.drawHead(h, threadKind: .wood, into: $0, rect: $1)
+                                        IconRenderer.swatch(key: "head-\(h.rawValue)-wood-\(printer.screwOrientation.rawValue)-\(printer.threaded)") {
+                                            IconRenderer.drawHead(h, threadKind: .wood, threaded: printer.threaded, orientation: printer.screwOrientation, into: $0, rect: $1)
                                         }
                                     },
                                     title: { $0.displayName },
                                     selected: { printer.head == $0 && printer.threadKind == .wood },
                                     select: { printer.head = $0; printer.threadKind = .wood })
+                        }
+
+                        // Orientation + threads, under the head type section.
+                        HStack(spacing: 16) {
+                            HStack {
+                                Text("Orientation").font(.caption).foregroundStyle(.secondary)
+                                Picker("Orientation", selection: $printer.screwOrientation) {
+                                    ForEach(ScrewOrientation.allCases) { o in
+                                        Image(systemName: o.symbol).tag(o)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .frame(width: 100)
+                            }
+                            Toggle("Threads", isOn: $printer.threaded)
+                            Spacer()
+                        }
+                    }
+
+                    // Nut / washer chosen from an icon grid.
+                    if printer.category == .nutWasher {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Nut / washer").font(.caption).foregroundStyle(.secondary)
+                            iconRow(NutWasherType.allCases,
+                                    image: { t in
+                                        IconRenderer.swatch(key: "nutwasher-\(t.rawValue)") {
+                                            IconRenderer.drawNutWasher(t, into: $0, rect: $1)
+                                        }
+                                    },
+                                    title: { $0.displayName },
+                                    selected: { $0 == printer.nutWasher },
+                                    select: { printer.nutWasher = $0 })
                         }
                     }
                 }
@@ -223,7 +266,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
-            .frame(height: 180)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } label: {
             HStack {
                 Text("Logs")
@@ -274,6 +317,14 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .padding(.horizontal, 12)
+        }
+
+        ToolbarItem(placement: .automatic) {
+            Toggle(isOn: $showLogs) {
+                Label("Logs", systemImage: "square.bottomthird.inset.filled")
+            }
+            .help(showLogs ? "Hide log" : "Show log")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {

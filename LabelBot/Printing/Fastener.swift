@@ -111,6 +111,30 @@ enum LabelLength {
     static let auto = 0   // sentinel: size to content
 }
 
+/// Selectable nut / washer icons.
+enum NutWasherType: String, CaseIterable, Identifiable, Sendable {
+    case hexNut, squareNut, washer, lockWasher, tNut
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .hexNut: "Hex Nut"
+        case .squareNut: "Square Nut"
+        case .washer: "Washer"
+        case .lockWasher: "Lock Washer"
+        case .tNut: "T-Nut"
+        }
+    }
+}
+
+/// How screw icons are drawn.
+enum IconStyle: String, CaseIterable, Identifiable, Sendable {
+    case simple = "Simple"   // separate head side-profile + drive top view
+    case bolt = "Bolt"       // one integrated bolt with the drive cut into the head
+
+    var id: String { rawValue }
+}
+
 /// Orientation of the screw side-profile (head) icon.
 enum ScrewOrientation: String, CaseIterable, Identifiable, Sendable {
     case vertical = "Vertical"

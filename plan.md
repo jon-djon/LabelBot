@@ -93,6 +93,14 @@ ContentView        text field · tape picker · connect · print · status
   Note: `label.alch.shop` icons are opentype.js font glyphs extruded in three.js
   (proprietary, no license) — not liftable SVGs. Use only as visual inspiration.
 
+  Icon styles (drawn): **Simple** = separate head side-profile + drive top view;
+  **Bolt** = one integrated bolt with a zig-zag threaded body and the drive cut
+  into the head face. The Bolt style reimplements the look of
+  [ndevenish/gflabel](https://github.com/ndevenish/gflabel)'s `webbolt` fragment
+  (BSD-3-Clause) in Core Graphics — proportions/geometry borrowed, no code copied.
+  Head map for Bolt: pan→rounded corner, countersunk→cone, socket/hex/flange→
+  rectangle, button→dome, grub/none→plain body.
+
 - **Structured options** (2026-07-04): label spec built from Category
   (Screws/Bolts · Nuts & Washers · Threaded Inserts) → contextual Head/Drive/Thread
   for screws → Units (Metric/Imperial) → Size entry toggle (guided pickers *or* free

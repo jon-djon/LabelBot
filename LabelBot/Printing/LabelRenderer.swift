@@ -55,6 +55,8 @@ enum LabelRenderer {
                        drive: DriveType = .none, head: HeadType = .none,
                        threadKind: ThreadKind = .machine,
                        source: IconSource = .drawn, showIcons: Bool = true,
+                       iconStyle: IconStyle = .simple, threaded: Bool = true,
+                       nutWasher: NutWasherType = .hexNut,
                        screwOrientation: ScrewOrientation = .vertical,
                        fixedLengthDots: Int? = nil,
                        alignment: LabelAlignment = .center,
@@ -86,13 +88,22 @@ enum LabelRenderer {
         switch category {
         case _ where !showIcons:
             break
+        case .screwBolt where iconStyle == .bolt && source == .drawn:
+            // One integrated bolt with the drive cut into the head.
+            if head != .none || drive != .none {
+                iconDraws.append { c, r in
+                    IconRenderer.drawBolt(head: head, drive: drive, threadKind: threadKind,
+                                          threaded: threaded,
+                                          orientation: screwOrientation, into: c, rect: r)
+                }
+            }
         case .screwBolt:
             if head != .none {
                 iconDraws.append { c, r in
                     if source == .imported, let image = IconRenderer.importedImage(stem: "head-\(head.rawValue)") {
                         IconRenderer.drawImage(image, into: c, rect: r)
                     } else {
-                        IconRenderer.drawHead(head, threadKind: threadKind,
+                        IconRenderer.drawHead(head, threadKind: threadKind, threaded: threaded,
                                               orientation: screwOrientation, into: c, rect: r)
                     }
                 }
@@ -108,10 +119,10 @@ enum LabelRenderer {
             }
         case .nutWasher:
             iconDraws.append { c, r in
-                if source == .imported, let image = IconRenderer.importedImage(stem: "category-nut") {
+                if source == .imported, let image = IconRenderer.importedImage(stem: "category-\(nutWasher.rawValue)") {
                     IconRenderer.drawImage(image, into: c, rect: r)
                 } else {
-                    IconRenderer.drawNut(into: c, rect: r)
+                    IconRenderer.drawNutWasher(nutWasher, into: c, rect: r)
                 }
             }
         case .insert:

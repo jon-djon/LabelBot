@@ -21,56 +21,28 @@ enum IconRenderer {
     static func drawDrive(_ type: DriveType, into ctx: CGContext, rect: CGRect) {
         let c = CGPoint(x: rect.midX, y: rect.midY)
         let r = min(rect.width, rect.height) / 2
-        ctx.setFillColor(gray: 0, alpha: 1)
 
         switch type {
         case .none:
-            break
-        case .hex: // hex socket: black disc with a hexagonal hole
-            ctx.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-            ctx.setFillColor(gray: 1, alpha: 1)
-            ctx.addPath(polygon(center: c, radius: r * 0.6, sides: 6, rotation: .pi / 6))
-            ctx.fillPath()
-        case .externalHex: // bolt head from the top: solid hexagon
+            return
+        case .externalHex: // bolt head from the top: solid hexagon, no head disc
+            ctx.setFillColor(gray: 0, alpha: 1)
             ctx.addPath(polygon(center: c, radius: r, sides: 6, rotation: .pi / 6))
             ctx.fillPath()
-        case .torx:
-            ctx.addPath(star(center: c, outer: r, inner: r * 0.7, points: 6, rotation: -.pi / 2))
-            ctx.fillPath()
-        case .securityTorx: // torx with a center pin
-            ctx.addPath(star(center: c, outer: r, inner: r * 0.7, points: 6, rotation: -.pi / 2))
-            ctx.fillPath()
-            ctx.setFillColor(gray: 1, alpha: 1)
-            ctx.fillEllipse(in: CGRect(x: c.x - r * 0.3, y: c.y - r * 0.3, width: r * 0.6, height: r * 0.6))
+        default:
+            // Screw head seen from the top: a black disc with the drive recess cut
+            // out in white.
             ctx.setFillColor(gray: 0, alpha: 1)
-            ctx.fillEllipse(in: CGRect(x: c.x - r * 0.14, y: c.y - r * 0.14, width: r * 0.28, height: r * 0.28))
-        case .phillips:
-            let t = r * 0.34
-            ctx.fill(CGRect(x: c.x - t, y: c.y - r, width: 2 * t, height: 2 * r))
-            ctx.fill(CGRect(x: c.x - r, y: c.y - t, width: 2 * r, height: 2 * t))
-        case .pozidriv:
-            let t = r * 0.30
-            ctx.fill(CGRect(x: c.x - t, y: c.y - r, width: 2 * t, height: 2 * r))
-            ctx.fill(CGRect(x: c.x - r, y: c.y - t, width: 2 * r, height: 2 * t))
-            ctx.saveGState()
-            ctx.translateBy(x: c.x, y: c.y)
-            ctx.rotate(by: .pi / 4)
-            let s = r * 0.15
-            ctx.fill(CGRect(x: -s, y: -r * 0.7, width: 2 * s, height: r * 1.4))
-            ctx.fill(CGRect(x: -r * 0.7, y: -s, width: r * 1.4, height: 2 * s))
-            ctx.restoreGState()
-        case .robertson:
-            let s = r * 0.8
-            ctx.fill(CGRect(x: c.x - s, y: c.y - s, width: 2 * s, height: 2 * s))
-        case .slotted:
-            let h = r * 0.3
-            ctx.fill(CGRect(x: c.x - r, y: c.y - h, width: 2 * r, height: 2 * h))
+            ctx.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+            let recess = r * 0.6
+            fillDriveCut(type, center: c, radius: recess, cutRadius: r / recess, into: ctx)
         }
     }
 
     // MARK: - Head icons (side profile)
 
     static func drawHead(_ type: HeadType, threadKind: ThreadKind = .machine,
+                         threaded: Bool = true,
                          orientation: ScrewOrientation = .vertical,
                          into ctx: CGContext, rect: CGRect) {
         ctx.saveGState()
@@ -90,9 +62,27 @@ enum IconRenderer {
         let shaftW = rect.width * 0.34
         let headW = rect.width * 0.82
         let shaftTop = bottom + h * 0.5
+        // Diagonal white grooves suggesting a thread, clipped to the shaft column.
+        func threadGrooves(from shaftBottom: CGFloat, to shaftTopY: CGFloat, width w: CGFloat) {
+            guard threaded else { return }
+            ctx.saveGState()
+            ctx.clip(to: CGRect(x: cx - w / 2, y: shaftBottom, width: w, height: shaftTopY - shaftBottom))
+            ctx.setStrokeColor(gray: 1, alpha: 1)
+            ctx.setLineWidth(w * 0.16)
+            let step = w * 0.62
+            var y = shaftBottom - w
+            while y < shaftTopY {
+                ctx.move(to: CGPoint(x: cx - w, y: y))
+                ctx.addLine(to: CGPoint(x: cx + w, y: y + w))
+                y += step
+            }
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
         func shaft() {
             guard threadKind == .wood else {
                 ctx.fill(CGRect(x: cx - shaftW / 2, y: bottom, width: shaftW, height: shaftTop - bottom))
+                threadGrooves(from: bottom, to: shaftTop, width: shaftW)
                 return
             }
             // Wood screw: taper the shaft to a point.
@@ -105,6 +95,7 @@ enum IconRenderer {
             p.closeSubpath()
             ctx.addPath(p)
             ctx.fillPath()
+            threadGrooves(from: bottom + tip, to: shaftTop, width: shaftW)
         }
 
         switch type {
@@ -112,6 +103,7 @@ enum IconRenderer {
             break
         case .grub: // headless set screw: a threaded cylinder
             ctx.fill(CGRect(x: cx - shaftW / 2, y: bottom, width: shaftW, height: h * 0.92))
+            threadGrooves(from: bottom, to: bottom + h * 0.92, width: shaftW)
         case .socketCap:
             shaft()
             ctx.fill(CGRect(x: cx - headW * 0.4, y: shaftTop, width: headW * 0.8, height: top - shaftTop))
@@ -157,9 +149,164 @@ enum IconRenderer {
         }
     }
 
+    // MARK: - Integrated bolt icon (gflabel "webbolt" style)
+
+    /// A single bolt silhouette: a zig-zag threaded body on one side and a head
+    /// on the other, with the drive shape cut into the head face. Proportions and
+    /// layout follow ndevenish/gflabel's `webbolt` fragment (BSD-3), reimplemented
+    /// here in Core Graphics. Drawn lengthwise (head trailing); `orientation`
+    /// rotates it upright.
+    static func drawBolt(head: HeadType, drive: DriveType, threadKind: ThreadKind = .machine,
+                         threaded: Bool = true,
+                         orientation: ScrewOrientation = .horizontal,
+                         into ctx: CGContext, rect: CGRect) {
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        if orientation == .vertical {
+            ctx.translateBy(x: rect.midX, y: rect.midY)
+            ctx.rotate(by: .pi / 2)
+            ctx.translateBy(x: -rect.midX, y: -rect.midY)
+        }
+
+        // gflabel: 15 wide for 12 tall → width = 1.456 * height.
+        let gH = min(rect.height, rect.width / 1.456) * 0.98
+        let width = 1.456 * gH
+        let bodyW = 0.856 * gH
+        let headW = width - bodyW
+        let threadDepth = 0.0707 * gH
+        let nThreads = 6
+        let x0 = -width / 2
+        let xHead = bodyW - width / 2
+        let pitch = bodyW / CGFloat(nThreads)
+        let tip = gH / 4 + threadDepth
+        let hh = gH / 2
+        let cx = rect.midX, cy = rect.midY
+        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: cx + x, y: cy + y) }
+
+        // Upper outline, left end → body → head, ending on the axis at the right.
+        var top: [CGPoint]
+        if threaded {
+            top = [P(x0, 0)]   // pointed thread start
+            for i in 0..<nThreads {
+                let xi = x0 + CGFloat(i) * pitch
+                top.append(P(xi, tip - threadDepth))
+                top.append(P(xi + pitch / 2, tip))
+            }
+            top.append(P(xHead, tip - threadDepth))
+        } else {
+            let bodyHalf = tip - threadDepth / 2   // smooth cylinder at the mean radius
+            top = [P(x0, bodyHalf), P(xHead, bodyHalf)]
+        }
+
+        switch head {
+        case .countersunk:
+            top.append(P(width / 2, hh))
+            top.append(P(width / 2, 0))
+        case .socketCap, .hex, .flangeHex:
+            top.append(P(xHead, hh))
+            top.append(P(width / 2, hh))
+            top.append(P(width / 2, 0))
+        case .pan:
+            let r = 0.167 * gH
+            top.append(P(xHead, hh))
+            top.append(P(width / 2 - r, hh))
+            appendArc(&top, center: P(width / 2 - r, hh - r), radius: r, from: .pi / 2, to: 0)
+            top.append(P(width / 2, 0))
+        case .button:
+            top.append(P(xHead, hh))
+            appendArc(&top, center: P(width / 2 - hh, 0), radius: hh, from: .pi / 2, to: 0)
+            top.append(P(width / 2, 0))
+        case .grub, .none:
+            top.append(P(xHead, 0))
+        }
+
+        // Close by mirroring across the centerline (the left/right ends on the axis
+        // just add harmless zero-length segments; the smooth end closes vertically).
+        let path = CGMutablePath()
+        path.move(to: top[0])
+        for p in top.dropFirst() { path.addLine(to: p) }
+        for p in top.reversed() {
+            path.addLine(to: CGPoint(x: p.x, y: 2 * cy - p.y))
+        }
+        path.closeSubpath()
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.addPath(path)
+        ctx.fillPath()
+
+        // Cut the drive into the head face (white on black).
+        let hasHead = head != .none && head != .grub
+        if hasHead {
+            let fudge = threadDepth / 2
+            let center = P(width / 2 - headW / 2 - fudge, 0)
+            let r = headW * 0.9 / 2
+            let cutRadius = (headW / 2) / (headW * 0.9 / 2)   // slot overshoot to reach the edge
+            fillDriveCut(drive, center: center, radius: r, cutRadius: cutRadius, into: ctx)
+        }
+    }
+
+    /// Fills the drive recess as white shapes over the black head. Geometry mirrors
+    /// gflabel's `drive_shape` (unit shapes scaled by the head diameter).
+    private static func fillDriveCut(_ drive: DriveType, center c: CGPoint,
+                                     radius r: CGFloat, cutRadius: CGFloat, into ctx: CGContext) {
+        let d = 2 * r
+        switch drive {
+        case .none, .externalHex:
+            break
+        case .phillips:
+            fillRect(ctx, c, d, 0.2 * d, 0)
+            fillRect(ctx, c, 0.2 * d, d, 0)
+            fillRect(ctx, c, 0.4 * d, 0.4 * d, .pi / 4)
+        case .pozidriv:
+            fillRect(ctx, c, d, 0.2 * d, 0)
+            fillRect(ctx, c, 0.2 * d, d, 0)
+            fillRect(ctx, c, 0.4 * d, 0.4 * d, .pi / 4)
+            fillRect(ctx, c, d, 0.1 * d, .pi / 4)
+            fillRect(ctx, c, d, 0.1 * d, -.pi / 4)
+        case .slotted:
+            fillRect(ctx, c, cutRadius * d, 0.2 * d, 0)
+        case .hex:
+            ctx.setFillColor(gray: 1, alpha: 1)
+            ctx.addPath(polygon(center: c, radius: 0.5 * d, sides: 6, rotation: 0))
+            ctx.fillPath()
+        case .robertson:
+            fillRect(ctx, c, 0.6 * d, 0.6 * d, .pi / 4)
+        case .torx:
+            fillTorx(ctx, center: c, radius: r)
+        case .securityTorx:
+            fillTorx(ctx, center: c, radius: r)
+            ctx.setFillColor(gray: 0, alpha: 1)
+            ctx.fillEllipse(in: CGRect(x: c.x - 0.14 * d, y: c.y - 0.14 * d, width: 0.28 * d, height: 0.28 * d))
+        }
+    }
+
+    private static func fillTorx(_ ctx: CGContext, center c: CGPoint, radius r: CGFloat) {
+        ctx.setFillColor(gray: 1, alpha: 1)
+        ctx.addPath(star(center: c, outer: r, inner: 0.58 * r, points: 6, rotation: -.pi / 2))
+        ctx.fillPath()
+    }
+
+    /// Fills a white rectangle centered at `c`, rotated by `rot` radians.
+    private static func fillRect(_ ctx: CGContext, _ c: CGPoint, _ w: CGFloat, _ h: CGFloat, _ rot: CGFloat) {
+        ctx.saveGState()
+        ctx.translateBy(x: c.x, y: c.y)
+        ctx.rotate(by: rot)
+        ctx.setFillColor(gray: 1, alpha: 1)
+        ctx.fill(CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+        ctx.restoreGState()
+    }
+
+    private static func appendArc(_ pts: inout [CGPoint], center: CGPoint, radius: CGFloat,
+                                  from: CGFloat, to: CGFloat, steps: Int = 6) {
+        for i in 0...steps {
+            let a = from + (to - from) * CGFloat(i) / CGFloat(steps)
+            pts.append(CGPoint(x: center.x + radius * cos(a), y: center.y + radius * sin(a)))
+        }
+    }
+
     // MARK: - Category icons
 
-    /// Hex nut, top view: a hexagon with a round hole.
+    /// Hex nut, top view: a flat-top hexagon with a round hole. Hole radius 0.4× the
+    /// outer radius, matching gflabel's `hexnut`.
     static func drawNut(into ctx: CGContext, rect: CGRect) {
         let c = CGPoint(x: rect.midX, y: rect.midY)
         let r = min(rect.width, rect.height) / 2
@@ -167,24 +314,111 @@ enum IconRenderer {
         ctx.addPath(polygon(center: c, radius: r, sides: 6, rotation: 0))
         ctx.fillPath()
         ctx.setFillColor(gray: 1, alpha: 1)
-        ctx.fillEllipse(in: CGRect(x: c.x - r * 0.5, y: c.y - r * 0.5, width: r, height: r))
+        let hole = r * 0.4
+        ctx.fillEllipse(in: CGRect(x: c.x - hole, y: c.y - hole, width: 2 * hole, height: 2 * hole))
     }
 
-    /// Threaded insert, side view: a barrel with a bore and knurl rings.
-    static func drawInsert(into ctx: CGContext, rect: CGRect) {
+    /// Flat washer, top view: a ring. Hole radius 0.55× the outer radius, matching
+    /// gflabel's `washer`.
+    static func drawWasher(into ctx: CGContext, rect: CGRect) {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
         ctx.setFillColor(gray: 0, alpha: 1)
-        let barrelW = rect.width * 0.62
-        let x = rect.midX - barrelW / 2
-        ctx.fill(CGRect(x: x, y: rect.minY, width: barrelW, height: rect.height))
-
+        ctx.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
         ctx.setFillColor(gray: 1, alpha: 1)
-        let boreW = barrelW * 0.34
-        ctx.fill(CGRect(x: rect.midX - boreW / 2, y: rect.minY + rect.height * 0.06,
-                        width: boreW, height: rect.height * 0.88))
-        let rings = 4
-        for i in 0..<rings {
-            let ly = rect.minY + rect.height * (0.14 + 0.72 * CGFloat(i) / CGFloat(rings - 1))
-            ctx.fill(CGRect(x: x, y: ly, width: barrelW, height: rect.height * 0.05))
+        let hole = r * 0.55
+        ctx.fillEllipse(in: CGRect(x: c.x - hole, y: c.y - hole, width: 2 * hole, height: 2 * hole))
+    }
+
+    /// Square nut, top view: a square with a round hole (gflabel `squarenut`).
+    static func drawSquareNut(into ctx: CGContext, rect: CGRect) {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let side = min(rect.width, rect.height)
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.fill(CGRect(x: c.x - side / 2, y: c.y - side / 2, width: side, height: side))
+        ctx.setFillColor(gray: 1, alpha: 1)
+        let hole = side / 2 * 0.55
+        ctx.fillEllipse(in: CGRect(x: c.x - hole, y: c.y - hole, width: 2 * hole, height: 2 * hole))
+    }
+
+    /// Lock washer, top view: a ring with a diagonal split cut (gflabel `lockwasher`).
+    static func drawLockWasher(into ctx: CGContext, rect: CGRect) {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+        ctx.setFillColor(gray: 1, alpha: 1)
+        let hole = r * 0.55
+        ctx.fillEllipse(in: CGRect(x: c.x - hole, y: c.y - hole, width: 2 * hole, height: 2 * hole))
+        // Split gap, subtracted as a slim rotated bar.
+        fillRect(ctx, CGPoint(x: c.x + 0.2 * r, y: c.y + 0.775 * r), 0.275 * r, 1.55 * r, .pi / 4)
+    }
+
+    /// T-nut, side profile: a tall rounded barrel with a bore (gflabel `tnut`).
+    static func drawTNut(into ctx: CGContext, rect: CGRect) {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let hgt = min(rect.width, rect.height)
+        let w = 0.6 * hgt
+        ctx.setFillColor(gray: 0, alpha: 1)
+        let barrel = CGPath(roundedRect: CGRect(x: c.x - w / 2, y: c.y - hgt / 2, width: w, height: hgt),
+                            cornerWidth: hgt / 7, cornerHeight: hgt / 7, transform: nil)
+        ctx.addPath(barrel)
+        ctx.fillPath()
+        ctx.setFillColor(gray: 1, alpha: 1)
+        let hole = 0.2 * hgt
+        ctx.fillEllipse(in: CGRect(x: c.x - hole, y: c.y - hole, width: 2 * hole, height: 2 * hole))
+    }
+
+    /// Dispatches to the selected nut / washer drawing.
+    static func drawNutWasher(_ type: NutWasherType, into ctx: CGContext, rect: CGRect) {
+        switch type {
+        case .hexNut: drawNut(into: ctx, rect: rect)
+        case .squareNut: drawSquareNut(into: ctx, rect: rect)
+        case .washer: drawWasher(into: ctx, rect: rect)
+        case .lockWasher: drawLockWasher(into: ctx, rect: rect)
+        case .tNut: drawTNut(into: ctx, rect: rect)
+        }
+    }
+
+    /// Threaded insert, side view: two knurled flanges around a waist, with a
+    /// barrel below. Reimplements ndevenish/gflabel's `threaded_insert` fragment
+    /// (BSD-3) in Core Graphics — geometry borrowed, no code copied.
+    static func drawInsert(into ctx: CGContext, rect: CGRect) {
+        // gflabel model space: x in [-4, 4], y in [-6.26, 3.75].
+        let gW: CGFloat = 8, gH: CGFloat = 10.01
+        let s = min(rect.width / gW, rect.height / gH) * 0.98
+        let gcy: CGFloat = (3.75 - 6.26) / 2   // model bbox y-center
+        func M(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + x * s, y: rect.midY + (y - gcy) * s)
+        }
+
+        // Spool + barrel silhouette: top flange, waist, bottom flange, barrel.
+        let outline = [
+            M(-4, 3.75), M(4, 3.75),
+            M(4, 1.25), M(3, 1.25), M(3, -1.25), M(4, -1.25),
+            M(4, -3.75), M(3, -3.75), M(3, -6.26),
+            M(-3, -6.26), M(-3, -3.75), M(-4, -3.75),
+            M(-4, -1.25), M(-3, -1.25), M(-3, 1.25), M(-4, 1.25),
+        ]
+        let path = CGMutablePath()
+        path.addLines(between: outline)
+        path.closeSubpath()
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.addPath(path)
+        ctx.fillPath()
+
+        // Knurl: slanted parallelogram cuts across each flange (white).
+        let trap: [(CGFloat, CGFloat)] = [(-1.074, 0.65), (-0.226, 0.65), (1.074, -0.65), (0.226, -0.65)]
+        let cols: [CGFloat] = [-2.4375, -0.8125, 0.8125, 2.4375]
+        ctx.setFillColor(gray: 1, alpha: 1)
+        for row in [-2.5, 2.5] as [CGFloat] {
+            for col in cols {
+                let p = CGMutablePath()
+                p.addLines(between: trap.map { M($0.0 + col, $0.1 + row) })
+                p.closeSubpath()
+                ctx.addPath(p)
+                ctx.fillPath()
+            }
         }
     }
 
