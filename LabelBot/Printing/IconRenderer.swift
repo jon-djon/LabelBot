@@ -62,48 +62,55 @@ enum IconRenderer {
         let shaftW = rect.width * 0.34
         let headW = rect.width * 0.82
         let shaftTop = bottom + h * 0.5
-        // Diagonal white grooves suggesting a thread, clipped to the shaft column.
-        func threadGrooves(from shaftBottom: CGFloat, to shaftTopY: CGFloat, width w: CGFloat) {
-            guard threaded else { return }
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: cx - w / 2, y: shaftBottom, width: w, height: shaftTopY - shaftBottom))
-            ctx.setStrokeColor(gray: 1, alpha: 1)
-            ctx.setLineWidth(w * 0.16)
-            let step = w * 0.62
-            var y = shaftBottom - w
-            while y < shaftTopY {
-                ctx.move(to: CGPoint(x: cx - w, y: y))
-                ctx.addLine(to: CGPoint(x: cx + w, y: y + w))
-                y += step
+        // A shaft column: a plain rectangle, or a triangle-threaded (sawtooth-edged)
+        // column when `threaded`. Crests reach the full width, roots pull inward.
+        func column(from yb: CGFloat, to yt: CGFloat, width w: CGFloat) {
+            ctx.setFillColor(gray: 0, alpha: 1)
+            guard threaded else {
+                ctx.fill(CGRect(x: cx - w / 2, y: yb, width: w, height: yt - yb))
+                return
             }
-            ctx.strokePath()
-            ctx.restoreGState()
+            let half = w / 2
+            let root = half - w * 0.14
+            let n = max(4, Int(((yt - yb) / (w * 0.30)).rounded()))
+            let pitch = (yt - yb) / CGFloat(n)
+            var right: [CGPoint] = [CGPoint(x: cx + root, y: yb)]
+            for i in 0..<n {
+                let y0 = yb + CGFloat(i) * pitch
+                right.append(CGPoint(x: cx + half, y: y0 + pitch / 2))
+                right.append(CGPoint(x: cx + root, y: y0 + pitch))
+            }
+            let path = CGMutablePath()
+            path.move(to: right[0])
+            for p in right.dropFirst() { path.addLine(to: p) }
+            for p in right.reversed() { path.addLine(to: CGPoint(x: 2 * cx - p.x, y: p.y)) }
+            path.closeSubpath()
+            ctx.addPath(path)
+            ctx.fillPath()
         }
         func shaft() {
             guard threadKind == .wood else {
-                ctx.fill(CGRect(x: cx - shaftW / 2, y: bottom, width: shaftW, height: shaftTop - bottom))
-                threadGrooves(from: bottom, to: shaftTop, width: shaftW)
+                column(from: bottom, to: shaftTop, width: shaftW)
                 return
             }
-            // Wood screw: taper the shaft to a point.
+            // Wood screw: threaded (or plain) column above a pointed tip.
             let tip = (shaftTop - bottom) * 0.35
-            ctx.fill(CGRect(x: cx - shaftW / 2, y: bottom + tip, width: shaftW, height: shaftTop - bottom - tip))
+            column(from: bottom + tip, to: shaftTop, width: shaftW)
             let p = CGMutablePath()
             p.move(to: CGPoint(x: cx - shaftW / 2, y: bottom + tip))
             p.addLine(to: CGPoint(x: cx + shaftW / 2, y: bottom + tip))
             p.addLine(to: CGPoint(x: cx, y: bottom))
             p.closeSubpath()
+            ctx.setFillColor(gray: 0, alpha: 1)
             ctx.addPath(p)
             ctx.fillPath()
-            threadGrooves(from: bottom + tip, to: shaftTop, width: shaftW)
         }
 
         switch type {
         case .none:
             break
         case .grub: // headless set screw: a threaded cylinder
-            ctx.fill(CGRect(x: cx - shaftW / 2, y: bottom, width: shaftW, height: h * 0.92))
-            threadGrooves(from: bottom, to: bottom + h * 0.92, width: shaftW)
+            column(from: bottom, to: bottom + h * 0.92, width: shaftW)
         case .socketCap:
             shaft()
             ctx.fill(CGRect(x: cx - headW * 0.4, y: shaftTop, width: headW * 0.8, height: top - shaftTop))
