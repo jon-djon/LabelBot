@@ -19,9 +19,13 @@ struct ContentView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         previewSection
+                        Divider()
                         tapeSection
+                        Divider()
                         categorySection
+                        Divider()
                         textSection
+                        Divider()
                         iconsSection
                     }
                     .padding(20)
@@ -126,22 +130,41 @@ struct ContentView: View {
     /// Live label preview.
     private var previewSection: some View {
         GroupBox {
-            ZStack(alignment: previewAlignment) {
-                RoundedRectangle(cornerRadius: 4).fill(.white)
-                if let preview = printer.preview {
-                    Image(nsImage: preview)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, alignment: previewAlignment)
-                        .padding(6)
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: previewAlignment) {
+                    RoundedRectangle(cornerRadius: 4).fill(.white)
+                    if let preview = printer.preview {
+                        Image(nsImage: preview)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, alignment: previewAlignment)
+                            .padding(6)
+                    }
                 }
+                .frame(height: 64)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
+
+                HStack(spacing: 6) {
+                    Label("Height \(mmString(printer.previewHeightMM))", systemImage: "arrow.up.and.down")
+                    Text("·").foregroundStyle(.tertiary)
+                    Label("Length \(mmString(printer.previewLengthMM))", systemImage: "arrow.left.and.right")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .frame(height: 64)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
         } label: {
             sectionLabel("Preview")
         }
+    }
+
+    /// Formats a millimeter measurement, dropping a trailing ".0".
+    private func mmString(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        let number = rounded == rounded.rounded()
+            ? String(Int(rounded))
+            : String(format: "%.1f", rounded)
+        return "\(number) mm"
     }
 
     /// Tape width (shared) + this label's length and alignment.
@@ -152,6 +175,8 @@ struct ContentView: View {
                     ForEach(TapeSize.all) { Text($0.label).tag($0) }
                 }
                 .frame(width: 130)
+
+                rowDivider
 
                 Picker("Length", selection: $printer.current.lengthMM) {
                     Text("Auto").tag(LabelLength.auto)
@@ -166,6 +191,8 @@ struct ContentView: View {
                     }
                 }
                 .frame(width: 150)
+
+                rowDivider
 
                 Picker("Align", selection: $printer.current.alignment) {
                     ForEach(LabelAlignment.allCases) { align in
@@ -201,53 +228,121 @@ struct ContentView: View {
         }
     }
 
-    /// Everything that makes up the label text: size + custom text.
+    /// Everything that makes up the label text: 1 or 2 sections, each with its own
+    /// size + custom text.
     private var textSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                // Size: unit system + entry mode + the size value itself.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Size").font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Picker("Units", selection: $printer.current.unit) {
-                            ForEach(UnitSystem.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(width: 180)
-                        Picker("Size entry", selection: $printer.current.sizeMode) {
-                            ForEach(SizeEntryMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(width: 160)
-                        Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                // Sections count, at the top.
+                HStack(spacing: 8) {
+                    rowLabel("Sections")
+                    Picker("Sections", selection: $printer.current.textLayout) {
+                        ForEach(TextLayout.allCases) { Text($0.rawValue).tag($0) }
                     }
-
-                    // Size input: guided pickers or free text.
-                    if printer.current.sizeMode == .pickers {
-                        HStack {
-                            Picker("Size", selection: $printer.current.diameter) {
-                                ForEach(printer.current.availableDiameters, id: \.self) { Text($0).tag($0) }
-                            }
-                            if printer.current.category.isScrew {
-                                Picker("Length", selection: $printer.current.length) {
-                                    ForEach(printer.current.availableLengths, id: \.self) { Text($0).tag($0) }
-                                }
-                            }
-                        }
-                    } else {
-                        TextField("Size (e.g. M3 × 8)", text: $printer.current.sizeText)
-                            .textFieldStyle(.roundedBorder)
-                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    Spacer()
                 }
 
-                // Custom text.
-                TextField("Custom text (optional)", text: $printer.current.customText)
-                    .textFieldStyle(.roundedBorder)
+                if printer.current.textLayout == .split {
+                    Text("Left").font(.caption2).foregroundStyle(.secondary)
+                    textEditor($printer.current.text1)
+                    Divider()
+                    Text("Right").font(.caption2).foregroundStyle(.secondary)
+                    textEditor($printer.current.text2)
+                } else {
+                    textEditor($printer.current.text1)
+                }
             }
         } label: {
             sectionLabel("Text")
+        }
+    }
+
+    /// Inline caption label (natural width) before a mid-row control.
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary)
+    }
+
+    /// A row's leading label — fixed width so every row's first control starts at the
+    /// same x. Controls use `.fixedSize()` so their bezels sit at the leading edge
+    /// (a framed segmented control centers its content and looks misaligned).
+    private func rowLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .frame(width: 74, alignment: .leading)
+    }
+
+    private var rowDivider: some View {
+        Divider().frame(height: 22)
+    }
+
+    /// Size (pickers or free text) + custom text for one text section.
+    @ViewBuilder
+    private func textEditor(_ section: Binding<TextSection>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Top row: entry mode.
+            HStack(spacing: 8) {
+                rowLabel("Mode")
+                Picker("Size entry", selection: section.sizeMode) {
+                    ForEach(SizeEntryMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                Spacer()
+            }
+
+            // Pickers: units · size · length, each labeled and divided. Text: a field.
+            if section.wrappedValue.sizeMode == .pickers {
+                HStack(spacing: 8) {
+                    rowLabel("Units")
+                    Picker("Units", selection: section.unit) {
+                        ForEach(UnitSystem.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+
+                    rowDivider
+                    fieldLabel("Size")
+                    Picker("Size", selection: section.diameter) {
+                        ForEach(section.wrappedValue.availableDiameters, id: \.self) { Text($0).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+
+                    if printer.current.category.isScrew {
+                        rowDivider
+                        fieldLabel("Length")
+                        Picker("Length", selection: section.length) {
+                            ForEach(section.wrappedValue.availableLengths, id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    Spacer()
+                }
+            } else {
+                HStack(spacing: 8) {
+                    rowLabel("Size")
+                    TextField("e.g. M3 × 8", text: section.sizeText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 220)
+                    Spacer()
+                }
+            }
+
+            HStack(spacing: 8) {
+                rowLabel("Custom")
+                TextField("Optional", text: section.customText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 280)
+                Spacer()
+            }
         }
     }
 
@@ -258,25 +353,56 @@ struct ContentView: View {
                 Toggle("Show icons", isOn: $printer.current.showIcons)
                     .toggleStyle(.switch)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    // Drive + head chosen from icon grids (screws only).
+                // Style / label / orientation / threads on one row, divided like the Text section.
+                HStack(spacing: 8) {
                     if printer.current.category.isScrew {
-                        HStack {
-                            Text("Style").font(.caption).foregroundStyle(.secondary)
-                            Picker("Style", selection: $printer.current.iconStyle) {
-                                ForEach(IconStyle.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .frame(width: 130)
-                            Spacer()
+                        fieldLabel("Style")
+                        Picker("Style", selection: $printer.current.iconStyle) {
+                            ForEach(IconStyle.allCases) { Text($0.rawValue).tag($0) }
                         }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
 
+                        rowDivider
+                    }
+
+                    Toggle("Label icons", isOn: $printer.current.labelIcons)
+                        .toggleStyle(.switch)
+                        .help("Print each icon's name beneath it")
+
+                    if printer.current.category.isScrew {
+                        rowDivider
+                        fieldLabel("Orientation")
+                        Picker("Orientation", selection: $printer.current.screwOrientation) {
+                            ForEach(ScrewOrientation.allCases) { o in
+                                Image(systemName: o.symbol).tag(o)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+
+                        rowDivider
+                        Toggle("Threads", isOn: $printer.current.threaded)
+                            .toggleStyle(.switch)
+                    }
+                    Spacer()
+                }
+                .disabled(!printer.current.showIcons)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    // Drive + screw type chosen from icon grids (screws only).
+                    if printer.current.category.isScrew {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Drive type").font(.caption).foregroundStyle(.secondary)
-                            iconRow(DriveType.allCases,
+                            Toggle("Include drive type", isOn: Binding(
+                                get: { printer.current.drive != .none },
+                                set: { printer.current.drive = $0 ? .hex : .none }
+                            ))
+                            .toggleStyle(.checkbox)
+                            iconRow(DriveType.allCases.filter { $0 != .none },
                                     image: { d in
-                                        d == .none ? nil : IconRenderer.swatch(key: "drive-\(d.rawValue)") {
+                                        IconRenderer.swatch(key: "drive-\(d.rawValue)") {
                                             IconRenderer.drawDrive(d, into: $0, rect: $1)
                                         }
                                     },
@@ -286,11 +412,15 @@ struct ContentView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Head type").font(.caption).foregroundStyle(.secondary)
+                            Toggle("Include screw type", isOn: Binding(
+                                get: { printer.current.head != .none },
+                                set: { printer.current.head = $0 ? .pan : .none }
+                            ))
+                            .toggleStyle(.checkbox)
                             Text("Machine screws").font(.caption2).foregroundStyle(.secondary)
-                            iconRow(HeadType.allCases,
+                            iconRow(HeadType.allCases.filter { $0 != .none },
                                     image: { h in
-                                        h == .none ? nil : IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.current.screwOrientation.rawValue)-\(printer.current.threaded)") {
+                                        IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.current.screwOrientation.rawValue)-\(printer.current.threaded)") {
                                             IconRenderer.drawHead(h, threadKind: .machine, threaded: printer.current.threaded, orientation: printer.current.screwOrientation, into: $0, rect: $1)
                                         }
                                     },
@@ -315,23 +445,6 @@ struct ContentView: View {
                                         s.head = $0; s.threadKind = .wood
                                         printer.current = s
                                     })
-                        }
-
-                        // Orientation + threads, under the head type section.
-                        HStack(spacing: 16) {
-                            HStack {
-                                Text("Orientation").font(.caption).foregroundStyle(.secondary)
-                                Picker("Orientation", selection: $printer.current.screwOrientation) {
-                                    ForEach(ScrewOrientation.allCases) { o in
-                                        Image(systemName: o.symbol).tag(o)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .labelsHidden()
-                                .frame(width: 100)
-                            }
-                            Toggle("Threads", isOn: $printer.current.threaded)
-                            Spacer()
                         }
                     }
 

@@ -277,7 +277,7 @@ enum IconRenderer {
             ctx.fillPath()
         case .robertson:
             fillRect(ctx, c, 0.6 * d, 0.6 * d, .pi / 4)
-        case .torx:
+        case .torx, .torx15, .torx25:
             fillTorx(ctx, center: c, radius: r)
         case .securityTorx:
             fillTorx(ctx, center: c, radius: r)

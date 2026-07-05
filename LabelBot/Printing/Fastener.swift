@@ -9,7 +9,7 @@
 import Foundation
 
 enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
-    case none, hex, torx, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
+    case none, hex, torx, torx15, torx25, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
 
     var id: String { rawValue }
     var displayName: String {
@@ -17,6 +17,8 @@ enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
         case .none: "None"
         case .hex: "Hex / Allen"
         case .torx: "Torx"
+        case .torx15: "T-15"
+        case .torx25: "T-25"
         case .securityTorx: "Security Torx"
         case .phillips: "Phillips"
         case .pozidriv: "Pozidriv"
@@ -81,6 +83,14 @@ enum SizeEntryMode: String, CaseIterable, Identifiable, Sendable, Codable {
     var id: String { rawValue }
 }
 
+/// How many text sections the label has.
+enum TextLayout: String, CaseIterable, Identifiable, Sendable, Codable {
+    case single = "1"   // icons on the left, text to the right
+    case split = "2"    // icons in the middle, the same text on both sides
+
+    var id: String { rawValue }
+}
+
 /// Horizontal alignment of the label content (icons + text) within the tape length.
 enum LabelAlignment: String, CaseIterable, Identifiable, Sendable, Codable {
     case leading = "Left"
@@ -135,8 +145,8 @@ enum NutWasherType: String, CaseIterable, Identifiable, Sendable, Codable {
 
 /// How screw icons are drawn.
 enum IconStyle: String, CaseIterable, Identifiable, Sendable, Codable {
-    case simple = "Simple"   // separate head side-profile + drive top view
-    case bolt = "Bolt"       // one integrated bolt with the drive cut into the head
+    case separate = "Separate"   // separate head side-profile + drive top view
+    case combined = "Combined"   // one integrated bolt with the drive cut into the head
 
     var id: String { rawValue }
 }

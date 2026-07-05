@@ -37,6 +37,9 @@ final class PrinterManager {
     var selection: LabelSpec.ID? { didSet { updatePreview() } }
 
     private(set) var preview: NSImage?
+    /// Actual printed size of the current preview, in millimeters.
+    private(set) var previewHeightMM = 0.0
+    private(set) var previewLengthMM = 0.0
     private var transport: PrinterTransport?
 
     init() {
@@ -63,7 +66,9 @@ final class PrinterManager {
         set {
             guard labels.indices.contains(selectedIndex) else { return }
             var value = newValue
-            if value.unit != labels[selectedIndex].unit { value.normalizeForUnit() }
+            let old = labels[selectedIndex]
+            if value.text1.unit != old.text1.unit { value.text1.normalizeForUnit() }
+            if value.text2.unit != old.text2.unit { value.text2.normalizeForUnit() }
             labels[selectedIndex] = value
         }
     }
@@ -115,8 +120,8 @@ final class PrinterManager {
         for token in tokens {
             var spec = template
             spec.id = UUID()
-            spec.sizeMode = .text
-            spec.sizeText = token
+            spec.text1.sizeMode = .text
+            spec.text1.sizeText = token
             spec.copies = 1
             new.append(spec)
         }
@@ -132,7 +137,10 @@ final class PrinterManager {
     }
 
     func updatePreview() {
-        preview = LabelRenderer.render(current, tape: tape).preview
+        let rendered = LabelRenderer.render(current, tape: tape)
+        preview = rendered.preview
+        previewHeightMM = Double(tape.widthMM)
+        previewLengthMM = Double(rendered.lengthDots) / LabelRenderer.dotsPerMM
     }
 
     // MARK: - Save / load

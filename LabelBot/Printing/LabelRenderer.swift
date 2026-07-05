@@ -55,91 +55,199 @@ enum LabelRenderer {
         let fixedLengthDots = spec.lengthMM > 0
             ? Int((spec.lengthMM * dotsPerMM).rounded())
             : nil
-        return render(text: spec.labelText, tape: tape, category: spec.category,
+        return render(text: spec.leftText, text2: spec.rightText, tape: tape, category: spec.category,
                       drive: spec.drive, head: spec.head, threadKind: spec.threadKind,
                       showIcons: spec.showIcons, iconStyle: spec.iconStyle,
                       threaded: spec.threaded, nutWasher: spec.nutWasher,
                       screwOrientation: spec.screwOrientation,
-                      fixedLengthDots: fixedLengthDots, alignment: spec.alignment)
+                      fixedLengthDots: fixedLengthDots, alignment: spec.alignment,
+                      labelIcons: spec.labelIcons, textLayout: spec.textLayout)
     }
 
-    static func render(text: String, tape: TapeSize,
+    static func render(text: String, text2: String? = nil, tape: TapeSize,
                        category: FastenerCategory = .screwBolt,
                        drive: DriveType = .none, head: HeadType = .none,
                        threadKind: ThreadKind = .machine,
                        showIcons: Bool = true,
-                       iconStyle: IconStyle = .simple, threaded: Bool = true,
+                       iconStyle: IconStyle = .separate, threaded: Bool = true,
                        nutWasher: NutWasherType = .hexNut,
                        screwOrientation: ScrewOrientation = .vertical,
                        fixedLengthDots: Int? = nil,
                        alignment: LabelAlignment = .center,
+                       labelIcons: Bool = false,
+                       textLayout: TextLayout = .single,
                        fontName: String? = nil) -> RenderedLabel {
-        let pins = tape.printablePins
-        let verticalPadding = 2
-        let contentHeight = max(1, pins - 2 * verticalPadding)
-
-        // Size the font so the text height fills the printable band.
-        let baseSize: CGFloat = 100
-        let baseFont = makeFont(fontName, size: baseSize)
-        let baseHeight = CTFontGetAscent(baseFont as CTFont) + CTFontGetDescent(baseFont as CTFont)
-        let fontSize = baseSize * (CGFloat(contentHeight) / max(1, baseHeight))
-        let font = makeFont(fontName, size: fontSize)
-
-        let display = text.isEmpty ? " " : text
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: display, attributes: attributes))
-        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-        let textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-
-        // Icons occupy square cells on the left, at the full printable height.
-        let height = pins
-        let iconSide = CGFloat(height)
+        let height = tape.printablePins
+        let verticalPadding: CGFloat = 2
         let iconGap: CGFloat = 8
-        let horizontalPadding = 8
-        // Which icons to draw, left-to-right, depending on category (unless icons off).
-        var iconDraws: [(CGContext, CGRect) -> Void] = []
+        let horizontalPadding: CGFloat = 8
+
+        // Icons to draw, left-to-right, each with the caption to show underneath.
+        var icons: [(caption: String, draw: (CGContext, CGRect) -> Void)] = []
         switch category {
         case _ where !showIcons:
             break
-        case .screwBolt where iconStyle == .bolt:
+        case .screwBolt where iconStyle == .combined:
             // One integrated bolt with the drive cut into the head.
             if head != .none || drive != .none {
-                iconDraws.append { c, r in
+                let caption = [head == .none ? nil : head.displayName,
+                               drive == .none ? nil : drive.displayName]
+                    .compactMap { $0 }.joined(separator: " ")
+                icons.append((caption, { c, r in
                     IconRenderer.drawBolt(head: head, drive: drive, threadKind: threadKind,
                                           threaded: threaded,
                                           orientation: screwOrientation, into: c, rect: r)
-                }
+                }))
             }
         case .screwBolt:
             if head != .none {
-                iconDraws.append { c, r in
+                icons.append((head.displayName, { c, r in
                     IconRenderer.drawHead(head, threadKind: threadKind, threaded: threaded,
                                           orientation: screwOrientation, into: c, rect: r)
-                }
+                }))
             }
             if drive != .none {
-                iconDraws.append { c, r in
+                icons.append((drive.displayName, { c, r in
                     IconRenderer.drawDrive(drive, into: c, rect: r)
-                }
+                }))
             }
         case .nutWasher:
-            iconDraws.append { c, r in
+            icons.append((nutWasher.displayName, { c, r in
                 IconRenderer.drawNutWasher(nutWasher, into: c, rect: r)
-            }
+            }))
         case .insert:
-            iconDraws.append { c, r in
+            icons.append(("Insert", { c, r in
                 IconRenderer.drawInsert(into: c, rect: r)
+            }))
+        }
+        let iconCount = icons.count
+        let captioned = labelIcons && iconCount > 0
+
+        let usableHeight = CGFloat(height) - 2 * verticalPadding
+        let textGap = iconGap
+        let split = textLayout == .split
+
+        // Base font metrics; the content font is this scaled to the printable band.
+        let baseSize: CGFloat = 100
+        let baseFont = makeFont(fontName, size: baseSize)
+        let baseHeight = CTFontGetAscent(baseFont as CTFont) + CTFontGetDescent(baseFont as CTFont)
+
+        // Measures the text + icon columns at a given fraction of the printable
+        // height. Everything that carries visual weight scales with `scale`; the
+        // paddings and gaps between elements stay fixed.
+        func measure(_ scale: CGFloat)
+            -> (line: CTLine, line2: CTLine, ascent: CGFloat, descent: CGFloat,
+                textWidth: CGFloat, textWidth2: CGFloat,
+                capLines: [CTLine], capAscent: CGFloat, capDescent: CGFloat,
+                columnWidths: [CGFloat], iconsBlockWidth: CGFloat,
+                captionBand: CGFloat, captionGap: CGFloat, iconBand: CGFloat,
+                iconSide: CGFloat, usedHeight: CGFloat) {
+            let contentHeight = usableHeight * scale
+            let font = makeFont(fontName, size: baseSize * (contentHeight / max(1, baseHeight)))
+            func makeLine(_ s: String) -> CTLine {
+                let display = s.isEmpty ? " " : s
+                return CTLineCreateWithAttributedString(
+                    NSAttributedString(string: display, attributes: [.font: font, .foregroundColor: NSColor.black]))
+            }
+            let line = makeLine(text)
+            var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+            let textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let line2 = makeLine(text2 ?? text)
+            let textWidth2 = CGFloat(CTLineGetTypographicBounds(line2, nil, nil, nil))
+
+            // When captioning, split each icon column into an icon band (top) and a
+            // caption band (bottom); the icons shrink to make room.
+            let captionGap: CGFloat = captioned ? 3 : 0
+            let captionBand = captioned ? max(1, contentHeight * 0.28) : 0
+            let iconBand = captioned ? max(1, contentHeight - captionBand - captionGap) : contentHeight
+            let iconSide = iconBand
+
+            let capFontSize = captionBand * 0.9
+            let capFont = NSFont.systemFont(ofSize: max(1, capFontSize))
+            var capLines: [CTLine] = []
+            var capAscent: CGFloat = 0, capDescent: CGFloat = 0, capLeading: CGFloat = 0
+            var columnWidths: [CGFloat] = []
+            for icon in icons {
+                if captioned {
+                    let l = CTLineCreateWithAttributedString(
+                        NSAttributedString(string: icon.caption, attributes: [.font: capFont, .foregroundColor: NSColor.black]))
+                    let w = CGFloat(CTLineGetTypographicBounds(l, &capAscent, &capDescent, &capLeading))
+                    capLines.append(l)
+                    columnWidths.append(max(iconSide, w))
+                } else {
+                    columnWidths.append(iconSide)
+                }
+            }
+            // Icon block width (icons + inter-icon gaps, no trailing gap).
+            let iconsBlockWidth = columnWidths.reduce(0, +) + max(0, CGFloat(iconCount - 1)) * iconGap
+            let usedHeight = captioned ? (captionBand + captionGap + iconBand) : contentHeight
+            return (line, line2, ascent, descent, textWidth, textWidth2, capLines,
+                    capAscent, capDescent, columnWidths, iconsBlockWidth,
+                    captionBand, captionGap, iconBand, iconSide, usedHeight)
+        }
+
+        // Ideal (unclamped) content width. Single: icons then text. Split:
+        // text · icons · text with equal halves (icons stay centred).
+        func idealWidth(text tw: CGFloat, text2 tw2: CGFloat, block: CGFloat) -> CGFloat {
+            let iconsSlot = iconCount > 0 ? block : 0
+            if split {
+                return 2 * horizontalPadding + 2 * max(tw, tw2)
+                    + (iconCount > 0 ? iconsSlot + 2 * textGap : textGap)
+            }
+            return 2 * horizontalPadding + iconsSlot + (iconCount > 0 ? textGap : 0) + tw
+        }
+
+        var m = measure(1)
+
+        // If a fixed length is requested and the natural content is too wide, scale
+        // the text + icons down uniformly so they fit (leaving vertical whitespace).
+        if let target = fixedLengthDots, target > 0,
+           idealWidth(text: m.textWidth, text2: m.textWidth2, block: m.iconsBlockWidth) > CGFloat(target) {
+            let interIconGaps = max(0, CGFloat(iconCount - 1)) * iconGap
+            let sumColumnWidths = iconCount > 0 ? m.iconsBlockWidth - interIconGaps : 0
+            // idealWidth is affine in scale: fixed + scale · scalable.
+            let fixed: CGFloat
+            let scalable: CGFloat
+            if split {
+                fixed = 2 * horizontalPadding + (iconCount > 0 ? interIconGaps + 2 * textGap : textGap)
+                scalable = 2 * max(m.textWidth, m.textWidth2) + sumColumnWidths
+            } else {
+                fixed = 2 * horizontalPadding + (iconCount > 0 ? interIconGaps + textGap : 0)
+                scalable = m.textWidth + sumColumnWidths
+            }
+            if scalable > 0 {
+                // 1px safety so rounding never nudges the content past the length.
+                let scale = (CGFloat(target) - fixed - 1) / scalable
+                m = measure(min(1, max(0.05, scale)))
             }
         }
 
-        let iconCount = iconDraws.count
-        let iconsWidth = CGFloat(iconCount) * (iconSide + iconGap)
+        let line = m.line
+        let line2 = m.line2
+        let ascent = m.ascent
+        let descent = m.descent
+        let textWidth = m.textWidth
+        let textWidth2 = m.textWidth2
+        let capLines = m.capLines
+        let capAscent = m.capAscent
+        let capDescent = m.capDescent
+        let columnWidths = m.columnWidths
+        let iconSide = m.iconSide
+        let captionBand = m.captionBand
+        let captionGap = m.captionGap
+        let iconBand = m.iconBand
+        let iconsSlot = iconCount > 0 ? m.iconsBlockWidth : 0
+        // Top of the (possibly shrunk) content block, centred within the band.
+        let captionBase = verticalPadding + (usableHeight - m.usedHeight) / 2
 
-        // Natural width from content, then grow to a fixed length if requested.
-        let contentWidth = max(1, horizontalPadding + Int(ceil(iconsWidth)) + Int(ceil(textWidth)) + horizontalPadding)
-        let width = max(contentWidth, fixedLengthDots ?? 0)
-        let slack = CGFloat(width - contentWidth)
+        let contentWidth = max(1, Int(ceil(idealWidth(text: textWidth, text2: textWidth2, block: m.iconsBlockWidth))))
+        // A fixed length is honored exactly (content is shrunk above to fit within
+        // it); with no fixed length the label grows to fit its content.
+        let width = fixedLengthDots.map { max(1, $0) } ?? contentWidth
+        let slack = max(0, CGFloat(width - contentWidth))
+        // In split mode the icons are centred, so alignment does not apply.
         let alignOffset: CGFloat = {
+            if split { return 0 }
             switch alignment {
             case .leading: return 0
             case .center: return slack / 2
@@ -157,34 +265,61 @@ enum LabelRenderer {
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         ctx.setShouldAntialias(true)
 
-        // Draw icons left-to-right: head first, then drive. Each is normalized to a
-        // common height and centered on the tape's vertical midline.
-        let iconTargetHeight = CGFloat(height) * 0.9
-
-        func placeIcon(cellX: CGFloat, draw: @escaping (CGContext, CGRect) -> Void) {
+        // Normalizes an icon and draws it as a square of `side`, centered at (cx, cy).
+        func placeIcon(centerX: CGFloat, centerY: CGFloat, side: CGFloat, draw: (CGContext, CGRect) -> Void) {
             guard let (image, aspect) = IconRenderer.normalizedIcon(side: height, draw: draw) else { return }
-            var drawHeight = iconTargetHeight
+            var drawHeight = side * 0.92
             var drawWidth = drawHeight * aspect
-            if drawWidth > iconSide {                       // very wide symbol: fit the cell width instead
-                drawWidth = iconSide
+            if drawWidth > side {                       // very wide symbol: fit the cell width instead
+                drawWidth = side
                 drawHeight = drawWidth / aspect
             }
-            let rect = CGRect(x: cellX + (iconSide - drawWidth) / 2,
-                              y: (CGFloat(height) - drawHeight) / 2,
-                              width: drawWidth, height: drawHeight)
-            IconRenderer.drawImage(image, into: ctx, rect: rect)
+            IconRenderer.drawImage(image, into: ctx,
+                                   rect: CGRect(x: centerX - drawWidth / 2, y: centerY - drawHeight / 2,
+                                                width: drawWidth, height: drawHeight))
         }
 
-        var iconX = CGFloat(horizontalPadding) + alignOffset
-        for draw in iconDraws {
-            placeIcon(cellX: iconX, draw: draw)
-            iconX += iconSide + iconGap
+        let iconCenterY = captioned ? (captionBase + captionBand + captionGap + iconBand / 2)
+                                    : CGFloat(height) / 2
+
+        // Draws the icon block (with optional captions) starting at `startX`.
+        func drawIconBlock(startX: CGFloat) {
+            var columnX = startX
+            for (index, icon) in icons.enumerated() {
+                let columnWidth = columnWidths[index]
+                placeIcon(centerX: columnX + columnWidth / 2, centerY: iconCenterY, side: iconSide, draw: icon.draw)
+                if captioned {
+                    let capWidth = CGFloat(CTLineGetTypographicBounds(capLines[index], nil, nil, nil))
+                    let capBaseline = captionBase + (captionBand - (capAscent + capDescent)) / 2 + capDescent
+                    ctx.textPosition = CGPoint(x: columnX + (columnWidth - capWidth) / 2, y: capBaseline)
+                    CTLineDraw(capLines[index], ctx)
+                }
+                columnX += columnWidth + iconGap
+            }
         }
 
-        let textX = CGFloat(horizontalPadding) + alignOffset + iconsWidth
+        // Draws a text line with its baseline centred, horizontally centred in [x0, x1].
         let baseline = (CGFloat(height) - (ascent + descent)) / 2 + descent
-        ctx.textPosition = CGPoint(x: textX, y: baseline)
-        CTLineDraw(line, ctx)
+        func drawText(_ ctLine: CTLine, width lineWidth: CGFloat, centeredIn x0: CGFloat, _ x1: CGFloat) {
+            ctx.textPosition = CGPoint(x: x0 + ((x1 - x0) - lineWidth) / 2, y: baseline)
+            CTLineDraw(ctLine, ctx)
+        }
+
+        if split {
+            // text · icons · text, icons centred in the label.
+            let iconsStart = CGFloat(width) / 2 - iconsSlot / 2
+            if iconCount > 0 { drawIconBlock(startX: iconsStart) }
+            let leftEnd = iconCount > 0 ? iconsStart - textGap : CGFloat(width) / 2
+            let rightStart = iconCount > 0 ? iconsStart + iconsSlot + textGap : CGFloat(width) / 2
+            drawText(line, width: textWidth, centeredIn: CGFloat(horizontalPadding), leftEnd)
+            drawText(line2, width: textWidth2, centeredIn: rightStart, CGFloat(width) - CGFloat(horizontalPadding))
+        } else {
+            let blockX = CGFloat(horizontalPadding) + alignOffset
+            if iconCount > 0 { drawIconBlock(startX: blockX) }
+            let textX = blockX + iconsSlot + (iconCount > 0 ? textGap : 0)
+            ctx.textPosition = CGPoint(x: textX, y: baseline)
+            CTLineDraw(line, ctx)
+        }
 
         guard let raw = ctx.data else {
             return RenderedLabel(rasterLines: [], preview: NSImage(), lengthDots: 0)
