@@ -46,49 +46,55 @@ nonisolated enum RasterEncoder {
         return job(lines: lines, tapeWidthMM: tapeWidthMM)
     }
 
-    /// Wraps raster lines (each `bytesPerLine` long) in the full print-job command stream.
+    /// Wraps a single label's raster lines in a full print job.
     static func job(lines: [[UInt8]], tapeWidthMM: UInt8) -> Data {
+        batchJob(pages: [lines], tapeWidthMM: tapeWidthMM, cutBetween: true)
+    }
+
+    /// Builds one job that prints several labels ("pages") in order. With
+    /// `cutBetween`, auto-cut fires after every label (print → cut → print → cut);
+    /// pages other than the last end with the "print" command (0x0C) and the last
+    /// ends with "print + feed" (0x1A).
+    static func batchJob(pages: [[[UInt8]]], tapeWidthMM: UInt8, cutBetween: Bool) -> Data {
         var data = Data()
 
-        // 1. Invalidate: 100 null bytes flush any half-finished command in the buffer.
+        // --- Job header (sent once) ---
+        // Invalidate: 100 null bytes flush any half-finished command in the buffer.
         data.append(Data(repeating: 0x00, count: 100))
-
-        // 2. Initialize (ESC @).
-        data.append(contentsOf: [0x1B, 0x40])
-
-        // 3. Enter raster mode (ESC i a, 0x01).
-        data.append(contentsOf: [0x1B, 0x69, 0x61, 0x01])
-
-        // 4. Turn off automatic status notifications (ESC i !, 0x00) so our explicit
-        //    status request gets the real reply instead of phase-change spam.
-        data.append(contentsOf: [0x1B, 0x69, 0x21, 0x00])
-
-        // 5. Print information (ESC i z): flags 0x84, media type 0x00, width, length 0x00,
-        //    4-byte little-endian raster-line count, then n9/n10.
-        let n = UInt32(lines.count)
-        data.append(contentsOf: [0x1B, 0x69, 0x7A,
-            0x84,                       // valid flags (recover + length)
-            0x00,                       // media type
-            tapeWidthMM,                // media width (mm) — must match loaded tape
-            0x00,                       // media length
-            UInt8(n & 0xFF), UInt8((n >> 8) & 0xFF),
-            UInt8((n >> 16) & 0xFF), UInt8((n >> 24) & 0xFF),
-            0x00,                       // n9
-            0x00])                      // n10
-
-        // 6. Mode settings (ESC i M): auto-cut on (0x40).
-        data.append(contentsOf: [0x1B, 0x69, 0x4D, 0x40])
-
-        // 7. Advanced mode (ESC i K): no chain printing (0x08).
+        data.append(contentsOf: [0x1B, 0x40])              // ESC @  initialize
+        data.append(contentsOf: [0x1B, 0x69, 0x61, 0x01])  // ESC i a  raster mode
+        data.append(contentsOf: [0x1B, 0x69, 0x21, 0x00])  // ESC i !  status notify off
+        // ESC i M  mode: auto-cut on (0x40) when cutting between labels.
+        data.append(contentsOf: [0x1B, 0x69, 0x4D, cutBetween ? 0x40 : 0x00])
+        // ESC i A  cut every n labels — 1 = cut after each.
+        if cutBetween { data.append(contentsOf: [0x1B, 0x69, 0x41, 0x01]) }
+        // ESC i K  advanced mode: no chain printing (0x08).
         data.append(contentsOf: [0x1B, 0x69, 0x4B, 0x08])
 
-        // 8. Feed / margin amount (ESC i d): zero.
-        data.append(contentsOf: [0x1B, 0x69, 0x64, 0x00, 0x00])
+        // --- Pages ---
+        for (index, lines) in pages.enumerated() {
+            // ESC i z  print information: flags 0x84, media type, width, length,
+            // 4-byte LE raster-line count, then n9/n10.
+            let n = UInt32(lines.count)
+            data.append(contentsOf: [0x1B, 0x69, 0x7A,
+                0x84, 0x00, tapeWidthMM, 0x00,
+                UInt8(n & 0xFF), UInt8((n >> 8) & 0xFF),
+                UInt8((n >> 16) & 0xFF), UInt8((n >> 24) & 0xFF),
+                0x00, 0x00])
+            data.append(contentsOf: [0x1B, 0x69, 0x64, 0x00, 0x00])  // ESC i d  margin
+            data.append(contentsOf: [0x4D, 0x02])                    // M  TIFF/PackBits
 
-        // 9. Compression mode (M): 0x02 = TIFF / PackBits.
-        data.append(contentsOf: [0x4D, 0x02])
+            appendRasterLines(lines, to: &data)
 
-        // 10. Raster lines: 0x5A for an all-zero line, else 0x47 + LE16 length + packbits.
+            // Last page prints + feeds/cuts (0x1A); earlier pages just print (0x0C).
+            data.append(index == pages.count - 1 ? 0x1A : 0x0C)
+        }
+
+        return data
+    }
+
+    /// Appends raster lines: 0x5A for an all-zero line, else 0x47 + LE16 length + packbits.
+    private static func appendRasterLines(_ lines: [[UInt8]], to data: inout Data) {
         for var raster in lines {
             if raster.count != bytesPerLine {
                 raster = normalize(raster)
@@ -103,11 +109,6 @@ nonisolated enum RasterEncoder {
                 data.append(contentsOf: packed)
             }
         }
-
-        // 11. Print and feed (Ctrl-Z).
-        data.append(0x1A)
-
-        return data
     }
 
     /// Pads or trims a line to exactly `bytesPerLine`.

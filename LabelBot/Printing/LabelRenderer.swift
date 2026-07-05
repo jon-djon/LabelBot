@@ -50,6 +50,19 @@ enum LabelRenderer {
     /// Print resolution along the tape feed, used to convert a length in mm to dots.
     static let dotsPerMM = 180.0 / 25.4
 
+    /// Renders a full label spec onto the given (shared) tape.
+    static func render(_ spec: LabelSpec, tape: TapeSize) -> RenderedLabel {
+        let fixedLengthDots = spec.lengthMM > 0
+            ? Int((spec.lengthMM * dotsPerMM).rounded())
+            : nil
+        return render(text: spec.labelText, tape: tape, category: spec.category,
+                      drive: spec.drive, head: spec.head, threadKind: spec.threadKind,
+                      showIcons: spec.showIcons, iconStyle: spec.iconStyle,
+                      threaded: spec.threaded, nutWasher: spec.nutWasher,
+                      screwOrientation: spec.screwOrientation,
+                      fixedLengthDots: fixedLengthDots, alignment: spec.alignment)
+    }
+
     static func render(text: String, tape: TapeSize,
                        category: FastenerCategory = .screwBolt,
                        drive: DriveType = .none, head: HeadType = .none,

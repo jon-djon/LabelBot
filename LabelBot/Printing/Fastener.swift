@@ -8,7 +8,7 @@
 
 import Foundation
 
-enum DriveType: String, CaseIterable, Identifiable, Sendable {
+enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
     case none, hex, torx, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
 
     var id: String { rawValue }
@@ -27,7 +27,7 @@ enum DriveType: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum HeadType: String, CaseIterable, Identifiable, Sendable {
+enum HeadType: String, CaseIterable, Identifiable, Sendable, Codable {
     case none, countersunk, socketCap, pan, button, hex, flangeHex, grub
 
     var id: String { rawValue }
@@ -51,7 +51,7 @@ extension HeadType {
 }
 
 /// Top-level kind of fastener being labeled.
-enum FastenerCategory: String, CaseIterable, Identifiable, Sendable {
+enum FastenerCategory: String, CaseIterable, Identifiable, Sendable, Codable {
     case screwBolt = "Screws / Bolts"
     case nutWasher = "Nuts & Washers"
     case insert = "Threaded Inserts"
@@ -62,27 +62,27 @@ enum FastenerCategory: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Screw thread style (affects the shaft profile).
-enum ThreadKind: String, CaseIterable, Identifiable, Sendable {
+enum ThreadKind: String, CaseIterable, Identifiable, Sendable, Codable {
     case machine = "Machine"
     case wood = "Wood"
     var id: String { rawValue }
 }
 
-enum UnitSystem: String, CaseIterable, Identifiable, Sendable {
+enum UnitSystem: String, CaseIterable, Identifiable, Sendable, Codable {
     case metric = "Metric"
     case imperial = "Imperial"
     var id: String { rawValue }
 }
 
 /// How the size is chosen: guided dropdowns or free text.
-enum SizeEntryMode: String, CaseIterable, Identifiable, Sendable {
+enum SizeEntryMode: String, CaseIterable, Identifiable, Sendable, Codable {
     case pickers = "Pickers"
     case text = "Text"
     var id: String { rawValue }
 }
 
 /// Horizontal alignment of the label content (icons + text) within the tape length.
-enum LabelAlignment: String, CaseIterable, Identifiable, Sendable {
+enum LabelAlignment: String, CaseIterable, Identifiable, Sendable, Codable {
     case leading = "Left"
     case center = "Center"
     case trailing = "Right"
@@ -98,13 +98,27 @@ enum LabelAlignment: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Fixed print lengths (mm) offered alongside the "Auto" (fit-to-content) option.
+/// Lengths are stored in mm; Gridfinity sizes are just a convenience mapping.
 enum LabelLength {
-    static let presetsMM = [15, 20, 25, 30, 40, 50, 60, 80, 100]
-    static let auto = 0   // sentinel: size to content
+    static let auto: Double = 0   // sentinel: size to content
+    static let presetsMM: [Double] = [15, 20, 25, 30, 40, 50, 60, 80, 100]
+
+    /// One Gridfinity unit is 35 mm.
+    static let gridfinityMM: Double = 35
+    static let gridfinityUnits: [Double] = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6]
+
+    /// Millimeter length for a Gridfinity size (in 0.5-unit steps).
+    static func mm(forGridfinity units: Double) -> Double { units * gridfinityMM }
+
+    /// Menu label for a Gridfinity size, e.g. "1 GU" or "0.5 GU".
+    static func gridfinityLabel(_ units: Double) -> String {
+        let value = units.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(units))" : "\(units)"
+        return "\(value) GU"
+    }
 }
 
 /// Selectable nut / washer icons.
-enum NutWasherType: String, CaseIterable, Identifiable, Sendable {
+enum NutWasherType: String, CaseIterable, Identifiable, Sendable, Codable {
     case hexNut, squareNut, washer, lockWasher, tNut
 
     var id: String { rawValue }
@@ -120,7 +134,7 @@ enum NutWasherType: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// How screw icons are drawn.
-enum IconStyle: String, CaseIterable, Identifiable, Sendable {
+enum IconStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case simple = "Simple"   // separate head side-profile + drive top view
     case bolt = "Bolt"       // one integrated bolt with the drive cut into the head
 
@@ -128,7 +142,7 @@ enum IconStyle: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Orientation of the screw side-profile (head) icon.
-enum ScrewOrientation: String, CaseIterable, Identifiable, Sendable {
+enum ScrewOrientation: String, CaseIterable, Identifiable, Sendable, Codable {
     case vertical = "Vertical"
     case horizontal = "Horizontal"
 

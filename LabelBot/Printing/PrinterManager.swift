@@ -2,13 +2,15 @@
 //  PrinterManager.swift
 //  LabelBot
 //
-//  Drives the connection lifecycle and printing. Owns the active transport and
-//  exposes observable state for the UI. Blocking I/O runs off the main actor.
+//  Drives the connection lifecycle and printing. Owns the active transport, the
+//  batch of labels being edited, and exposes observable state for the UI.
+//  Blocking I/O runs off the main actor.
 //
 
 import Foundation
 import Observation
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -26,81 +28,156 @@ final class PrinterManager {
     var isBusy = false
     private(set) var log: [String] = []
 
-    // Label composition.
+    // Shared output settings (one physical tape feeds the whole batch).
     var tape: TapeSize = .tape24 { didSet { updatePreview() } }
-    var lengthMM: Int = LabelLength.auto { didSet { updatePreview() } }   // 0 = auto/fit
-    var alignment: LabelAlignment = .center { didSet { updatePreview() } }
-    var category: FastenerCategory = .screwBolt { didSet { updatePreview() } }
-    var drive: DriveType = .hex { didSet { updatePreview() } }
-    var head: HeadType = .pan { didSet { updatePreview() } }
-    var threadKind: ThreadKind = .machine { didSet { updatePreview() } }
-    var screwOrientation: ScrewOrientation = .vertical { didSet { updatePreview() } }
-    var iconStyle: IconStyle = .simple { didSet { updatePreview() } }
-    var threaded = true { didSet { updatePreview() } }
-    var nutWasher: NutWasherType = .hexNut { didSet { updatePreview() } }
-    var unit: UnitSystem = .metric { didSet { unitChanged() } }
-    var sizeMode: SizeEntryMode = .pickers { didSet { updatePreview() } }
-    var diameter = SizeTables.metricDiameters[3] { didSet { updatePreview() } }   // M3
-    var length = SizeTables.metricLengths[3] { didSet { updatePreview() } }       // 8
-    var sizeText = "M3 × 8" { didSet { updatePreview() } }
-    var customText = "" { didSet { updatePreview() } }
-    var showIcons = true { didSet { updatePreview() } }
-    private(set) var preview: NSImage?
+    var cutBetween = true
 
+    // The batch of labels and the one currently being edited.
+    var labels: [LabelSpec] = [LabelSpec()] { didSet { updatePreview() } }
+    var selection: LabelSpec.ID? { didSet { updatePreview() } }
+
+    private(set) var preview: NSImage?
     private var transport: PrinterTransport?
 
-    var availableDiameters: [String] { unit == .metric ? SizeTables.metricDiameters : SizeTables.imperialDiameters }
-    var availableLengths: [String] { unit == .metric ? SizeTables.metricLengths : SizeTables.imperialLengths }
+    init() {
+        selection = labels.first?.id
+    }
 
-    /// The size portion of the label, from pickers or the free-text field.
-    var sizeString: String {
-        switch sizeMode {
-        case .text:
-            return sizeText.trimmingCharacters(in: .whitespaces)
-        case .pickers:
-            if category.isScrew {
-                return length.isEmpty ? diameter : "\(diameter) × \(length)"
-            }
-            return diameter
+    // MARK: - Selected label
+
+    var selectedIndex: Int {
+        labels.firstIndex { $0.id == selection } ?? 0
+    }
+
+    /// Total number of physical labels the batch will print (copies expanded).
+    var totalLabels: Int {
+        labels.reduce(0) { $0 + max(1, $1.copies) }
+    }
+
+    /// The label being edited. Setting it back keeps size selections valid and
+    /// refreshes the preview.
+    var current: LabelSpec {
+        get {
+            labels.indices.contains(selectedIndex) ? labels[selectedIndex] : LabelSpec()
+        }
+        set {
+            guard labels.indices.contains(selectedIndex) else { return }
+            var value = newValue
+            if value.unit != labels[selectedIndex].unit { value.normalizeForUnit() }
+            labels[selectedIndex] = value
         }
     }
 
-    /// Full label text: size plus any custom text.
-    var labelText: String {
-        [sizeString, customText]
+    // MARK: - Queue editing
+
+    func addLabel() {
+        var spec = LabelSpec()
+        spec.id = UUID()
+        labels.append(spec)
+        selection = spec.id
+    }
+
+    func duplicateSelected() {
+        guard labels.indices.contains(selectedIndex) else { return }
+        var copy = labels[selectedIndex]
+        copy.id = UUID()
+        labels.insert(copy, at: selectedIndex + 1)
+        selection = copy.id
+    }
+
+    func deleteSelected() {
+        guard labels.indices.contains(selectedIndex) else { return }
+        let idx = selectedIndex
+        labels.remove(at: idx)
+        if labels.isEmpty { labels = [LabelSpec()] }
+        selection = labels[min(idx, labels.count - 1)].id
+    }
+
+    func moveLabels(from offsets: IndexSet, to destination: Int) {
+        let moving = offsets.sorted().map { labels[$0] }
+        var reordered = labels
+        for index in offsets.sorted(by: >) { reordered.remove(at: index) }
+        let adjusted = destination - offsets.filter { $0 < destination }.count
+        reordered.insert(contentsOf: moving, at: max(0, min(adjusted, reordered.count)))
+        labels = reordered
+    }
+
+    /// Creates one label per size in a comma/newline-separated list, using the
+    /// currently-selected label as the template.
+    func generateLabels(from text: String) {
+        let tokens = text
+            .split(whereSeparator: { $0 == "\n" || $0 == "," })
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-            .joined(separator: "  ")
+        guard !tokens.isEmpty else { return }
+        let template = current
+        var new: [LabelSpec] = []
+        for token in tokens {
+            var spec = template
+            spec.id = UUID()
+            spec.sizeMode = .text
+            spec.sizeText = token
+            spec.copies = 1
+            new.append(spec)
+        }
+        labels.append(contentsOf: new)
+        selection = new.first?.id
+        appendLog("Added \(new.count) label\(new.count == 1 ? "" : "s") from list")
     }
 
-    private func unitChanged() {
-        if !availableDiameters.contains(diameter) { diameter = availableDiameters.first ?? "" }
-        if !availableLengths.contains(length) { length = availableLengths.first ?? "" }
-        updatePreview()
-    }
+    // MARK: - Rendering
 
-    private func renderLabel() -> RenderedLabel {
-        let fixedLengthDots = lengthMM > 0
-            ? Int((Double(lengthMM) * LabelRenderer.dotsPerMM).rounded())
-            : nil
-        return LabelRenderer.render(text: labelText, tape: tape, category: category,
-                                    drive: drive, head: head, threadKind: threadKind,
-                                    showIcons: showIcons,
-                                    iconStyle: iconStyle, threaded: threaded,
-                                    nutWasher: nutWasher,
-                                    screwOrientation: screwOrientation,
-                                    fixedLengthDots: fixedLengthDots, alignment: alignment)
+    func thumbnail(for spec: LabelSpec) -> NSImage {
+        LabelRenderer.render(spec, tape: tape).preview
     }
 
     func updatePreview() {
-        preview = renderLabel().preview
+        preview = LabelRenderer.render(current, tape: tape).preview
     }
+
+    // MARK: - Save / load
+
+    func saveBatch() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "labels.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let batch = LabelBatch(tapeWidthMM: tape.widthMM, cutBetween: cutBetween, labels: labels)
+        do {
+            let data = try JSONEncoder().encode(batch)
+            try data.write(to: url)
+            appendLog("Saved \(labels.count) labels to \(url.lastPathComponent)")
+        } catch {
+            appendLog("Save error: \(error.localizedDescription)")
+        }
+    }
+
+    func openBatch() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let batch = try JSONDecoder().decode(LabelBatch.self, from: Data(contentsOf: url))
+            if let t = TapeSize.all.first(where: { $0.widthMM == batch.tapeWidthMM }) { tape = t }
+            cutBetween = batch.cutBetween
+            labels = batch.labels.isEmpty ? [LabelSpec()] : batch.labels
+            selection = labels.first?.id
+            appendLog("Opened \(labels.count) labels from \(url.lastPathComponent)")
+        } catch {
+            appendLog("Open error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Logging
 
     private func appendLog(_ line: String) {
         let stamp = Date().formatted(date: .omitted, time: .standard)
         log.append("[\(stamp)] \(line)")
         if log.count > 200 { log.removeFirst(log.count - 200) }
     }
+
+    // MARK: - Connection
 
     /// Enumerates Brother USB devices so we can confirm the real product id / layout.
     func scanUSB() {
@@ -128,39 +205,28 @@ final class PrinterManager {
         }
     }
 
-    func printTestLabel() async {
-        guard !isBusy else { return }
-        guard let transport else {
-            statusText = "Not connected"
-            appendLog("Print skipped: not connected")
-            return
-        }
-        isBusy = true
-        defer { isBusy = false }
-
-        let payload = RasterEncoder.testPattern()
-        let statusRequest = RasterEncoder.statusRequest
-        do {
-            let statusBytes = try await Task.detached { () -> Data in
-                try transport.send(payload)
-                try transport.send(statusRequest)
-                return try transport.readStatus(maxLength: 32, timeout: 3)
-            }.value
-            appendLog("Sent test pattern (\(payload.count) bytes)")
-            if statusBytes.isEmpty {
-                appendLog("No status reply (expected in Phase 0 — needs a run loop / IN pipe)")
-            } else {
-                let hex = statusBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
-                appendLog("Status (\(statusBytes.count) B): \(hex)")
-            }
-            statusText = "Printed test label"
-        } catch {
-            statusText = "Print failed"
-            appendLog("Print error: \(error.localizedDescription)")
-        }
+    func disconnect() {
+        transport?.disconnect()
+        transport = nil
+        isConnected = false
+        statusText = "Not connected"
+        appendLog("Disconnected")
     }
 
-    func printText() async {
+    // MARK: - Printing
+
+    /// Prints the whole queue (respecting each label's copies), one job.
+    func printAll() async {
+        await printSpecs(labels.flatMap { Array(repeating: $0, count: max(1, $0.copies)) })
+    }
+
+    /// Prints just the selected label (respecting its copies).
+    func printSelected() async {
+        let spec = current
+        await printSpecs(Array(repeating: spec, count: max(1, spec.copies)))
+    }
+
+    private func printSpecs(_ specs: [LabelSpec]) async {
         guard !isBusy else { return }
         guard let transport else {
             statusText = "Not connected"
@@ -170,17 +236,22 @@ final class PrinterManager {
         isBusy = true
         defer { isBusy = false }
 
-        let rendered = renderLabel()
-        preview = rendered.preview
-        guard !rendered.rasterLines.isEmpty else {
+        let tape = self.tape
+        let pages = specs
+            .map { LabelRenderer.render($0, tape: tape).rasterLines }
+            .filter { !$0.isEmpty }
+        guard !pages.isEmpty else {
             appendLog("Nothing to print")
             return
         }
+        let n = pages.count
+        let plural = n == 1 ? "" : "s"
         let wake = RasterEncoder.initialize
         let statusRequest = RasterEncoder.statusRequest
-        let payload = RasterEncoder.job(lines: rendered.rasterLines, tapeWidthMM: tape.widthMM)
+        let payload = RasterEncoder.batchJob(pages: pages, tapeWidthMM: tape.widthMM, cutBetween: cutBetween)
+        statusText = "Printing \(n) label\(plural)…"
         do {
-            // Wake the printer and let it reach the ready state before sending the job.
+            // Wake the printer and let it reach the ready state before the job.
             // A cold (just-connected) printer otherwise drops the first job silently.
             let status = try await Task.detached { () -> Data in
                 try transport.send(wake)
@@ -193,8 +264,8 @@ final class PrinterManager {
             if let issue = Self.statusError(status) {
                 appendLog("Printer reported: \(issue)")
             }
-            appendLog("Printed \"\(labelText)\" — \(rendered.lengthDots) dots long, \(tape.label) (\(payload.count) B)")
-            statusText = "Printed label"
+            appendLog("Printed \(n) label\(plural) — \(tape.label) (\(payload.count) B)")
+            statusText = "Printed \(n) label\(plural)"
         } catch {
             appendLog("Print error: \(error.localizedDescription)")
             statusText = "Print failed"
@@ -217,13 +288,5 @@ final class PrinterManager {
         if e2 & 0x20 != 0 { reasons.append("overheated") }
         if reasons.isEmpty { reasons.append(String(format: "error 0x%02X 0x%02X", e1, e2)) }
         return reasons.joined(separator: ", ")
-    }
-
-    func disconnect() {
-        transport?.disconnect()
-        transport = nil
-        isConnected = false
-        statusText = "Not connected"
-        appendLog("Disconnected")
     }
 }

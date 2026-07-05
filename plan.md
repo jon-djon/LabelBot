@@ -107,10 +107,28 @@ ContentView        text field · tape picker · connect · print · status
   text) → optional custom text. Icons switch by category (screw head+drive, hex nut,
   insert barrel); wood screws draw a pointed shaft. Insert icon is a bit busy — refine.
 
+- **Batch printing** (2026-07-04): the app edits a *queue* of labels, not one.
+  - `LabelSpec` (Codable/Equatable/Identifiable) is one label's full config; the
+    tape width is shared across the batch (it's the physically loaded tape).
+    `PrinterManager` holds `labels: [LabelSpec]` + `selection`; `current` is a
+    get/set binding to the selected spec.
+  - UI: `HSplitView` master-detail — a queue list (thumbnail + summary, add /
+    duplicate / delete / reorder, per-label copies) on the left, the editor on the
+    right; log pane below. Toolbar "Print all · N", a Batch menu (open / save JSON /
+    add-from-list), and a "cut between labels" toggle.
+  - **Print / cut / print / cut**: one `RasterEncoder.batchJob` — the init/header is
+    sent once, then per page `ESC i z` + margin + `M 02` + raster + terminator. Pages
+    before the last end with `0x0C` (print), the last with `0x1A` (print + feed).
+    Auto-cut (`ESC i M 0x40`) + "cut every 1 label" (`ESC i A 0x01`) cut between each.
+    Verified at the byte level in `LabelBotTests`; not yet run on hardware.
+  - Bulk create: "add from list" turns a pasted list of sizes into one label each,
+    using the selected label as a template. Save/open a batch as JSON (`LabelBatch`).
+
 ## Later (beyond part 1)
 
-Multi-line + fonts → Gridfinity templates (name + size + icon) → batch print from a
-CSV/list of screw & insert sizes → symbol/icon library.
+Multi-line + fonts → Gridfinity templates (name + size + icon) → symbol/icon library.
+Per-label progress would need sequential jobs (poll status to "ready" between labels)
+instead of the single multi-page job.
 
 ## Entitlements
 

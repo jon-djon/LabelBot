@@ -8,111 +8,214 @@ import SwiftUI
 struct ContentView: View {
     @State private var printer = PrinterManager()
     @State private var showLogs = false
+    @State private var showGenerate = false
+    @State private var generateText = ""
 
     var body: some View {
-        VSplitView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    previewSection
-                    categorySection
-                    textSection
-                    iconsSection
-                }
-                .padding(20)
-                .onAppear { printer.updatePreview() }
-            }
-            .frame(minHeight: 260)
-
-            if showLogs {
-                logsSection
+        NavigationSplitView {
+            labelSidebar
+        } detail: {
+            VSplitView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        previewSection
+                        tapeSection
+                        categorySection
+                        textSection
+                        iconsSection
+                    }
                     .padding(20)
-                    .frame(minHeight: 140)
+                }
+                .frame(minWidth: 380, minHeight: 300)
+
+                if showLogs {
+                    logsSection
+                        .padding(20)
+                        .frame(minHeight: 140)
+                }
             }
         }
-        .frame(minWidth: 640, minHeight: 440)
+        .frame(minWidth: 880, minHeight: 500)
         .toolbar { connectionToolbar }
+        .sheet(isPresented: $showGenerate) { generateSheet }
+        .onAppear { printer.updatePreview() }
     }
 
-    // MARK: - Sections
+    // MARK: - Label queue
+
+    private var labelSidebar: some View {
+        List(selection: $printer.selection) {
+            ForEach(printer.labels) { spec in
+                queueRow(spec)
+            }
+            .onMove { printer.moveLabels(from: $0, to: $1) }
+        }
+        .navigationTitle("Labels")
+        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 340)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                HStack(spacing: 4) {
+                    Button { printer.addLabel() } label: { Image(systemName: "plus") }
+                        .help("Add label")
+                    Button { printer.duplicateSelected() } label: { Image(systemName: "plus.square.on.square") }
+                        .help("Duplicate label")
+                    Button { printer.deleteSelected() } label: { Image(systemName: "trash") }
+                        .help("Delete label")
+                        .disabled(printer.labels.count <= 1)
+                    Spacer()
+                    Button { generateText = ""; showGenerate = true } label: { Image(systemName: "text.badge.plus") }
+                        .help("Add many labels from a list")
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+
+                Divider()
+                Toggle("Cut between labels", isOn: $printer.cutBetween)
+                    .font(.callout)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+            .background(.bar)
+        }
+    }
+
+    private func queueRow(_ spec: LabelSpec) -> some View {
+        HStack(spacing: 10) {
+            Image(nsImage: printer.thumbnail(for: spec))
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 62, height: 28)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.3)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(spec.title).font(.callout).lineLimit(1)
+                Text(spec.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if spec.copies > 1 {
+                Text("×\(spec.copies)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .tag(spec.id)
+    }
+
+    // MARK: - Editor sections
 
     /// SwiftUI alignment mirroring the label's left/center/right setting.
     private var previewAlignment: Alignment {
-        switch printer.alignment {
+        switch printer.current.alignment {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
         }
     }
 
-    /// Tape width + live label preview.
+    /// A prominent header for the section GroupBoxes.
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+
+    /// Live label preview.
     private var previewSection: some View {
-        GroupBox("Preview") {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 16) {
-                    Picker("Tape", selection: $printer.tape) {
-                        ForEach(TapeSize.all) { Text($0.label).tag($0) }
-                    }
-                    .frame(width: 130)
-
-                    Picker("Length", selection: $printer.lengthMM) {
-                        Text("Auto").tag(LabelLength.auto)
-                        ForEach(LabelLength.presetsMM, id: \.self) { Text("\($0) mm").tag($0) }
-                    }
-                    .frame(width: 150)
-
-                    Picker("Align", selection: $printer.alignment) {
-                        ForEach(LabelAlignment.allCases) { align in
-                            Image(systemName: align.symbol).tag(align)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 120)
-
-                    Spacer()
+        GroupBox {
+            ZStack(alignment: previewAlignment) {
+                RoundedRectangle(cornerRadius: 4).fill(.white)
+                if let preview = printer.preview {
+                    Image(nsImage: preview)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, alignment: previewAlignment)
+                        .padding(6)
                 }
-
-                ZStack(alignment: previewAlignment) {
-                    RoundedRectangle(cornerRadius: 4).fill(.white)
-                    if let preview = printer.preview {
-                        Image(nsImage: preview)
-                            .interpolation(.none)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, alignment: previewAlignment)
-                            .padding(6)
-                    }
-                }
-                .frame(height: 64)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
             }
+            .frame(height: 64)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
+        } label: {
+            sectionLabel("Preview")
         }
     }
 
-    /// Top-level fastener category, above the text section.
-    private var categorySection: some View {
-        Picker("Type", selection: $printer.category) {
-            ForEach(FastenerCategory.allCases) { Text($0.rawValue).tag($0) }
+    /// Tape width (shared) + this label's length and alignment.
+    private var tapeSection: some View {
+        GroupBox {
+            HStack(spacing: 16) {
+                Picker("Tape", selection: $printer.tape) {
+                    ForEach(TapeSize.all) { Text($0.label).tag($0) }
+                }
+                .frame(width: 130)
+
+                Picker("Length", selection: $printer.current.lengthMM) {
+                    Text("Auto").tag(LabelLength.auto)
+                    Section("Millimeters") {
+                        ForEach(LabelLength.presetsMM, id: \.self) { Text("\(Int($0)) mm").tag($0) }
+                    }
+                    Section("Gridfinity") {
+                        ForEach(LabelLength.gridfinityUnits, id: \.self) { units in
+                            Text(LabelLength.gridfinityLabel(units))
+                                .tag(LabelLength.mm(forGridfinity: units))
+                        }
+                    }
+                }
+                .frame(width: 150)
+
+                Picker("Align", selection: $printer.current.alignment) {
+                    ForEach(LabelAlignment.allCases) { align in
+                        Image(systemName: align.symbol).tag(align)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 120)
+
+                Spacer()
+            }
+        } label: {
+            sectionLabel("Tape options")
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+    }
+
+    /// Fastener category + copies, above the text section.
+    private var categorySection: some View {
+        HStack(spacing: 12) {
+            Picker("Type", selection: $printer.current.category) {
+                ForEach(FastenerCategory.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Stepper(value: $printer.current.copies, in: 1...99) {
+                Text("Copies: \(printer.current.copies)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize()
+        }
     }
 
     /// Everything that makes up the label text: size + custom text.
     private var textSection: some View {
-        GroupBox("Text") {
+        GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 // Size: unit system + entry mode + the size value itself.
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Size").font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        Picker("Units", selection: $printer.unit) {
+                        Picker("Units", selection: $printer.current.unit) {
                             ForEach(UnitSystem.allCases) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         .frame(width: 180)
-                        Picker("Size entry", selection: $printer.sizeMode) {
+                        Picker("Size entry", selection: $printer.current.sizeMode) {
                             ForEach(SizeEntryMode.allCases) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
@@ -122,43 +225,45 @@ struct ContentView: View {
                     }
 
                     // Size input: guided pickers or free text.
-                    if printer.sizeMode == .pickers {
+                    if printer.current.sizeMode == .pickers {
                         HStack {
-                            Picker("Size", selection: $printer.diameter) {
-                                ForEach(printer.availableDiameters, id: \.self) { Text($0).tag($0) }
+                            Picker("Size", selection: $printer.current.diameter) {
+                                ForEach(printer.current.availableDiameters, id: \.self) { Text($0).tag($0) }
                             }
-                            if printer.category.isScrew {
-                                Picker("Length", selection: $printer.length) {
-                                    ForEach(printer.availableLengths, id: \.self) { Text($0).tag($0) }
+                            if printer.current.category.isScrew {
+                                Picker("Length", selection: $printer.current.length) {
+                                    ForEach(printer.current.availableLengths, id: \.self) { Text($0).tag($0) }
                                 }
                             }
                         }
                     } else {
-                        TextField("Size (e.g. M3 × 8)", text: $printer.sizeText)
+                        TextField("Size (e.g. M3 × 8)", text: $printer.current.sizeText)
                             .textFieldStyle(.roundedBorder)
                     }
                 }
 
                 // Custom text.
-                TextField("Custom text (optional)", text: $printer.customText)
+                TextField("Custom text (optional)", text: $printer.current.customText)
                     .textFieldStyle(.roundedBorder)
             }
+        } label: {
+            sectionLabel("Text")
         }
     }
 
     /// Icon on/off plus the drive/head pickers (screws only).
     private var iconsSection: some View {
-        GroupBox("Icons") {
+        GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Toggle("Show icons", isOn: $printer.showIcons)
+                Toggle("Show icons", isOn: $printer.current.showIcons)
                     .toggleStyle(.switch)
 
                 VStack(alignment: .leading, spacing: 10) {
                     // Drive + head chosen from icon grids (screws only).
-                    if printer.category.isScrew {
+                    if printer.current.category.isScrew {
                         HStack {
                             Text("Style").font(.caption).foregroundStyle(.secondary)
-                            Picker("Style", selection: $printer.iconStyle) {
+                            Picker("Style", selection: $printer.current.iconStyle) {
                                 ForEach(IconStyle.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .pickerStyle(.segmented)
@@ -176,8 +281,8 @@ struct ContentView: View {
                                         }
                                     },
                                     title: { $0.displayName },
-                                    selected: { $0 == printer.drive },
-                                    select: { printer.drive = $0 })
+                                    selected: { $0 == printer.current.drive },
+                                    select: { printer.current.drive = $0 })
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -185,30 +290,38 @@ struct ContentView: View {
                             Text("Machine screws").font(.caption2).foregroundStyle(.secondary)
                             iconRow(HeadType.allCases,
                                     image: { h in
-                                        h == .none ? nil : IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.screwOrientation.rawValue)-\(printer.threaded)") {
-                                            IconRenderer.drawHead(h, threadKind: .machine, threaded: printer.threaded, orientation: printer.screwOrientation, into: $0, rect: $1)
+                                        h == .none ? nil : IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.current.screwOrientation.rawValue)-\(printer.current.threaded)") {
+                                            IconRenderer.drawHead(h, threadKind: .machine, threaded: printer.current.threaded, orientation: printer.current.screwOrientation, into: $0, rect: $1)
                                         }
                                     },
                                     title: { $0.displayName },
-                                    selected: { printer.head == $0 && printer.threadKind == .machine },
-                                    select: { printer.head = $0; printer.threadKind = .machine })
+                                    selected: { printer.current.head == $0 && printer.current.threadKind == .machine },
+                                    select: {
+                                        var s = printer.current
+                                        s.head = $0; s.threadKind = .machine
+                                        printer.current = s
+                                    })
                             Text("Wood screws").font(.caption2).foregroundStyle(.secondary)
                             iconRow(HeadType.woodHeads,
                                     image: { h in
-                                        IconRenderer.swatch(key: "head-\(h.rawValue)-wood-\(printer.screwOrientation.rawValue)-\(printer.threaded)") {
-                                            IconRenderer.drawHead(h, threadKind: .wood, threaded: printer.threaded, orientation: printer.screwOrientation, into: $0, rect: $1)
+                                        IconRenderer.swatch(key: "head-\(h.rawValue)-wood-\(printer.current.screwOrientation.rawValue)-\(printer.current.threaded)") {
+                                            IconRenderer.drawHead(h, threadKind: .wood, threaded: printer.current.threaded, orientation: printer.current.screwOrientation, into: $0, rect: $1)
                                         }
                                     },
                                     title: { $0.displayName },
-                                    selected: { printer.head == $0 && printer.threadKind == .wood },
-                                    select: { printer.head = $0; printer.threadKind = .wood })
+                                    selected: { printer.current.head == $0 && printer.current.threadKind == .wood },
+                                    select: {
+                                        var s = printer.current
+                                        s.head = $0; s.threadKind = .wood
+                                        printer.current = s
+                                    })
                         }
 
                         // Orientation + threads, under the head type section.
                         HStack(spacing: 16) {
                             HStack {
                                 Text("Orientation").font(.caption).foregroundStyle(.secondary)
-                                Picker("Orientation", selection: $printer.screwOrientation) {
+                                Picker("Orientation", selection: $printer.current.screwOrientation) {
                                     ForEach(ScrewOrientation.allCases) { o in
                                         Image(systemName: o.symbol).tag(o)
                                     }
@@ -217,13 +330,13 @@ struct ContentView: View {
                                 .labelsHidden()
                                 .frame(width: 100)
                             }
-                            Toggle("Threads", isOn: $printer.threaded)
+                            Toggle("Threads", isOn: $printer.current.threaded)
                             Spacer()
                         }
                     }
 
                     // Nut / washer chosen from an icon grid.
-                    if printer.category == .nutWasher {
+                    if printer.current.category == .nutWasher {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Nut / washer").font(.caption).foregroundStyle(.secondary)
                             iconRow(NutWasherType.allCases,
@@ -233,13 +346,15 @@ struct ContentView: View {
                                         }
                                     },
                                     title: { $0.displayName },
-                                    selected: { $0 == printer.nutWasher },
-                                    select: { printer.nutWasher = $0 })
+                                    selected: { $0 == printer.current.nutWasher },
+                                    select: { printer.current.nutWasher = $0 })
                         }
                     }
                 }
-                .disabled(!printer.showIcons)
+                .disabled(!printer.current.showIcons)
             }
+        } label: {
+            sectionLabel("Icons")
         }
     }
 
@@ -255,7 +370,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } label: {
             HStack {
-                Text("Logs")
+                sectionLabel("Logs")
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()
@@ -269,7 +384,34 @@ struct ContentView: View {
         }
     }
 
-    /// Connection controls, hoisted into the window toolbar.
+    // MARK: - Add-from-list sheet
+
+    private var generateSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Add labels from a list").font(.headline)
+            Text("One size per line, or comma-separated. Each becomes a label using the selected label's type and icons.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $generateText)
+                .font(.body.monospaced())
+                .frame(width: 380, height: 170)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.3)))
+            HStack {
+                Spacer()
+                Button("Cancel") { showGenerate = false }
+                Button("Add labels") {
+                    printer.generateLabels(from: generateText)
+                    showGenerate = false
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(generateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Toolbar
+
     @ToolbarContentBuilder
     private var connectionToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
@@ -307,6 +449,18 @@ struct ContentView: View {
         }
 
         ToolbarItem(placement: .automatic) {
+            Menu {
+                Button("Open batch…") { printer.openBatch() }
+                Button("Save batch…") { printer.saveBatch() }
+                Divider()
+                Button("Add from list…") { generateText = ""; showGenerate = true }
+            } label: {
+                Label("Batch", systemImage: "ellipsis.circle")
+            }
+            .help("Open, save, or bulk-add labels")
+        }
+
+        ToolbarItem(placement: .automatic) {
             Toggle(isOn: $showLogs) {
                 Label("Logs", systemImage: "square.bottomthird.inset.filled")
             }
@@ -332,14 +486,14 @@ struct ContentView: View {
             }
 
             Button {
-                Task { await printer.printText() }
+                Task { await printer.printAll() }
             } label: {
-                Label("Print Label", systemImage: "printer")
+                Label("Print all · \(printer.totalLabels)", systemImage: "printer")
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut("p", modifiers: .command)
             .disabled(!printer.isConnected || printer.isBusy)
-            .help("Print the current label")
+            .help("Print every label in the queue")
         }
     }
 }
