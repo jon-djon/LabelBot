@@ -55,13 +55,27 @@ enum LabelRenderer {
         let fixedLengthDots = spec.lengthMM > 0
             ? Int((spec.lengthMM * dotsPerMM).rounded())
             : nil
-        return render(text: spec.leftText, text2: spec.rightText, tape: tape, category: spec.category,
+        // Threaded inserts with guided sizes get a dimensioned block: the size text,
+        // the length (↕ beside), the barrel diameter (↔ below), and an optional
+        // internal diameter — instead of plain size text.
+        let dimensioned = spec.category == .insert && spec.text1.sizeMode == .pickers
+        let mainText = dimensioned
+            ? spec.text1.customText.trimmingCharacters(in: .whitespaces)
+            : spec.leftText
+        return render(text: mainText, text2: spec.rightText, tape: tape, category: spec.category,
                       drive: spec.drive, head: spec.head, threadKind: spec.threadKind,
                       showIcons: spec.showIcons, iconStyle: spec.iconStyle,
                       threaded: spec.threaded, nutWasher: spec.nutWasher,
                       screwOrientation: spec.screwOrientation,
+                      screwLength: spec.screwLength.factor,
+                      spacing: spec.iconSpacing.factor,
                       fixedLengthDots: fixedLengthDots, alignment: spec.alignment,
-                      labelIcons: spec.labelIcons, textLayout: spec.textLayout)
+                      labelDrive: spec.labelDrive, labelHead: spec.labelHead,
+                      textLayout: spec.textLayout,
+                      dimensionSize: dimensioned ? spec.text1.diameter : nil,
+                      dimensionLength: dimensioned ? spec.text1.length : nil,
+                      dimensionDiameter: dimensioned ? spec.text1.outerDiameter : nil,
+                      dimensionInner: dimensioned ? spec.text1.innerDiameter : nil)
     }
 
     static func render(text: String, text2: String? = nil, tape: TapeSize,
@@ -72,60 +86,82 @@ enum LabelRenderer {
                        iconStyle: IconStyle = .separate, threaded: Bool = true,
                        nutWasher: NutWasherType = .hexNut,
                        screwOrientation: ScrewOrientation = .vertical,
+                       screwLength: Double = 1,
+                       spacing: Double = 1,
                        fixedLengthDots: Int? = nil,
                        alignment: LabelAlignment = .center,
-                       labelIcons: Bool = false,
+                       labelDrive: Bool = false,
+                       labelHead: Bool = false,
                        textLayout: TextLayout = .single,
+                       dimensionSize: String? = nil,
+                       dimensionLength: String? = nil,
+                       dimensionDiameter: String? = nil,
+                       dimensionInner: String? = nil,
                        fontName: String? = nil) -> RenderedLabel {
         let height = tape.printablePins
         let verticalPadding: CGFloat = 2
-        let iconGap: CGFloat = 8
+        // Gap between icons and between the icon block and the text (user-scalable).
+        let iconGap: CGFloat = 8 * CGFloat(spacing)
         let horizontalPadding: CGFloat = 8
 
-        // Icons to draw, left-to-right, each with the caption to show underneath.
-        var icons: [(caption: String, draw: (CGContext, CGRect) -> Void)] = []
+        // Icons to draw, left-to-right, each with an optional caption underneath.
+        // Captions toggle independently: `labelDrive` for the drive icon, `labelHead`
+        // for the screw-type (head) icon; nut/washer and insert use `labelHead`.
+        var icons: [(caption: String?, draw: (CGContext, CGRect) -> Void)] = []
         switch category {
         case _ where !showIcons:
             break
         case .screwBolt where iconStyle == .combined:
             // One integrated bolt with the drive cut into the head.
             if head != .none || drive != .none {
-                let caption = [head == .none ? nil : head.displayName,
-                               drive == .none ? nil : drive.displayName]
-                    .compactMap { $0 }.joined(separator: " ")
+                let parts = [labelHead && head != .none ? head.displayName : nil,
+                             labelDrive && drive != .none ? drive.displayName : nil].compactMap { $0 }
+                let caption = parts.isEmpty ? nil : parts.joined(separator: " ")
                 icons.append((caption, { c, r in
                     IconRenderer.drawBolt(head: head, drive: drive, threadKind: threadKind,
                                           threaded: threaded,
-                                          orientation: screwOrientation, into: c, rect: r)
+                                          orientation: screwOrientation, length: screwLength,
+                                          into: c, rect: r)
                 }))
             }
         case .screwBolt:
             if head != .none {
-                icons.append((head.displayName, { c, r in
+                icons.append((labelHead ? head.displayName : nil, { c, r in
                     IconRenderer.drawHead(head, threadKind: threadKind, threaded: threaded,
-                                          orientation: screwOrientation, into: c, rect: r)
+                                          orientation: screwOrientation, length: screwLength,
+                                          into: c, rect: r)
                 }))
             }
             if drive != .none {
-                icons.append((drive.displayName, { c, r in
+                icons.append((labelDrive ? drive.displayName : nil, { c, r in
                     IconRenderer.drawDrive(drive, into: c, rect: r)
                 }))
             }
         case .nutWasher:
-            icons.append((nutWasher.displayName, { c, r in
+            icons.append((labelHead ? nutWasher.displayName : nil, { c, r in
                 IconRenderer.drawNutWasher(nutWasher, into: c, rect: r)
             }))
         case .insert:
-            icons.append(("Insert", { c, r in
+            icons.append((labelHead ? "Insert" : nil, { c, r in
                 IconRenderer.drawInsert(into: c, rect: r)
             }))
         }
         let iconCount = icons.count
-        let captioned = labelIcons && iconCount > 0
+        // Reserve a caption band if any icon actually carries a caption.
+        let captioned = icons.contains { $0.caption != nil }
 
         let usableHeight = CGFloat(height) - 2 * verticalPadding
         let textGap = iconGap
         let split = textLayout == .split
+
+        // Dimensioned mode (threaded inserts): a size text, the length with a ↕
+        // beside it, the barrel diameter with a ↔ below it, and an optional
+        // internal diameter.
+        let dimensioned = dimensionSize != nil
+        let dimSize = dimensionSize ?? ""
+        let dimLength = dimensionLength ?? ""
+        let dimDiameter = dimensionDiameter ?? ""
+        let dimInner = dimensionInner ?? ""
 
         // Base font metrics; the content font is this scaled to the printable band.
         let baseSize: CGFloat = 100
@@ -138,12 +174,16 @@ enum LabelRenderer {
         func measure(_ scale: CGFloat)
             -> (line: CTLine, line2: CTLine, ascent: CGFloat, descent: CGFloat,
                 textWidth: CGFloat, textWidth2: CGFloat,
-                capLines: [CTLine], capAscent: CGFloat, capDescent: CGFloat,
+                capLines: [CTLine?], capAscent: CGFloat, capDescent: CGFloat,
                 columnWidths: [CGFloat], iconsBlockWidth: CGFloat,
                 captionBand: CGFloat, captionGap: CGFloat, iconBand: CGFloat,
-                iconSide: CGFloat, usedHeight: CGFloat) {
+                iconSide: CGFloat, usedHeight: CGFloat,
+                dimSizeLine: CTLine?, dimLenLine: CTLine?, dimDiaLine: CTLine?, dimInnerLine: CTLine?,
+                dimSizeWidth: CGFloat, dimLenWidth: CGFloat, dimDiaWidth: CGFloat, dimInnerWidth: CGFloat) {
             let contentHeight = usableHeight * scale
-            let font = makeFont(fontName, size: baseSize * (contentHeight / max(1, baseHeight)))
+            // Dimensioned numbers are smaller so the ↔ arrow fits below the diameter.
+            let fontHeight = dimensioned ? contentHeight * 0.62 : contentHeight
+            let font = makeFont(fontName, size: baseSize * (fontHeight / max(1, baseHeight)))
             func makeLine(_ s: String) -> CTLine {
                 let display = s.isEmpty ? " " : s
                 return CTLineCreateWithAttributedString(
@@ -151,9 +191,46 @@ enum LabelRenderer {
             }
             let line = makeLine(text)
             var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-            let textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            var textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
             let line2 = makeLine(text2 ?? text)
             let textWidth2 = CGFloat(CTLineGetTypographicBounds(line2, nil, nil, nil))
+
+            // Dimensioned block: [size] [length ↕] [diameter over ↔] [internal]
+            // [optional custom]. Its total width replaces the plain text width in
+            // the layout below; every part scales with the font so the fit math
+            // stays linear. Cell widths here must match drawDimensionBlock exactly.
+            var dimSizeLine: CTLine?, dimLenLine: CTLine?, dimDiaLine: CTLine?, dimInnerLine: CTLine?
+            var dimSizeWidth: CGFloat = 0, dimLenWidth: CGFloat = 0
+            var dimDiaWidth: CGFloat = 0, dimInnerWidth: CGFloat = 0
+            if dimensioned {
+                func lineWidth(_ s: String) -> (CTLine, CGFloat) {
+                    let l = makeLine(s)
+                    return (l, CGFloat(CTLineGetTypographicBounds(l, nil, nil, nil)))
+                }
+                let em = ascent + descent
+                var cellWidths: [CGFloat] = []
+                if !dimSize.isEmpty {
+                    (dimSizeLine, dimSizeWidth) = lineWidth(dimSize)
+                    cellWidths.append(dimSizeWidth)
+                }
+                if !dimLength.isEmpty {
+                    (dimLenLine, dimLenWidth) = lineWidth(dimLength)
+                    cellWidths.append(dimLenWidth + em * 0.7)     // text + gap + ↕
+                }
+                if !dimDiameter.isEmpty {
+                    (dimDiaLine, dimDiaWidth) = lineWidth(dimDiameter)
+                    cellWidths.append(max(dimDiaWidth, em * 0.9)) // ↔ spans this column
+                }
+                if !dimInner.isEmpty {
+                    (dimInnerLine, dimInnerWidth) = lineWidth(dimInner)
+                    cellWidths.append(dimInnerWidth)
+                }
+                if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                    cellWidths.append(textWidth)                  // custom text (`line`)
+                }
+                let midGap = em * 0.5
+                textWidth = cellWidths.reduce(0, +) + max(0, CGFloat(cellWidths.count - 1)) * midGap
+            }
 
             // When captioning, split each icon column into an icon band (top) and a
             // caption band (bottom); the icons shrink to make room.
@@ -164,18 +241,22 @@ enum LabelRenderer {
 
             let capFontSize = captionBand * 0.9
             let capFont = NSFont.systemFont(ofSize: max(1, capFontSize))
-            var capLines: [CTLine] = []
+            var capLines: [CTLine?] = []
             var capAscent: CGFloat = 0, capDescent: CGFloat = 0, capLeading: CGFloat = 0
             var columnWidths: [CGFloat] = []
             for icon in icons {
-                if captioned {
+                if captioned, let caption = icon.caption {
+                    // Captioned icon shrinks into the icon band to make room below.
                     let l = CTLineCreateWithAttributedString(
-                        NSAttributedString(string: icon.caption, attributes: [.font: capFont, .foregroundColor: NSColor.black]))
+                        NSAttributedString(string: caption, attributes: [.font: capFont, .foregroundColor: NSColor.black]))
                     let w = CGFloat(CTLineGetTypographicBounds(l, &capAscent, &capDescent, &capLeading))
                     capLines.append(l)
-                    columnWidths.append(max(iconSide, w))
+                    columnWidths.append(max(iconBand, w))
                 } else {
-                    columnWidths.append(iconSide)
+                    // Uncaptioned icon keeps the full height, unaffected by whether a
+                    // sibling icon is captioned.
+                    capLines.append(nil)
+                    columnWidths.append(contentHeight)
                 }
             }
             // Icon block width (icons + inter-icon gaps, no trailing gap).
@@ -183,7 +264,9 @@ enum LabelRenderer {
             let usedHeight = captioned ? (captionBand + captionGap + iconBand) : contentHeight
             return (line, line2, ascent, descent, textWidth, textWidth2, capLines,
                     capAscent, capDescent, columnWidths, iconsBlockWidth,
-                    captionBand, captionGap, iconBand, iconSide, usedHeight)
+                    captionBand, captionGap, iconBand, iconSide, usedHeight,
+                    dimSizeLine, dimLenLine, dimDiaLine, dimInnerLine,
+                    dimSizeWidth, dimLenWidth, dimDiaWidth, dimInnerWidth)
         }
 
         // Ideal (unclamped) content width. Single: icons then text. Split:
@@ -228,11 +311,19 @@ enum LabelRenderer {
         let descent = m.descent
         let textWidth = m.textWidth
         let textWidth2 = m.textWidth2
+        let dimSizeLine = m.dimSizeLine
+        let dimLenLine = m.dimLenLine
+        let dimDiaLine = m.dimDiaLine
+        let dimInnerLine = m.dimInnerLine
+        let dimSizeWidth = m.dimSizeWidth
+        let dimLenWidth = m.dimLenWidth
+        let dimDiaWidth = m.dimDiaWidth
+        let dimInnerWidth = m.dimInnerWidth
         let capLines = m.capLines
         let capAscent = m.capAscent
         let capDescent = m.capDescent
         let columnWidths = m.columnWidths
-        let iconSide = m.iconSide
+        let usedHeight = m.usedHeight
         let captionBand = m.captionBand
         let captionGap = m.captionGap
         let iconBand = m.iconBand
@@ -279,20 +370,26 @@ enum LabelRenderer {
                                                 width: drawWidth, height: drawHeight))
         }
 
-        let iconCenterY = captioned ? (captionBase + captionBand + captionGap + iconBand / 2)
-                                    : CGFloat(height) / 2
+        // A captioned icon shrinks into the icon band (centred above its caption);
+        // an uncaptioned icon uses the full height, centred — so toggling one icon's
+        // caption never changes another icon's size.
+        let captionedCenterY = captionBase + captionBand + captionGap + iconBand / 2
+        let fullCenterY = CGFloat(height) / 2
 
         // Draws the icon block (with optional captions) starting at `startX`.
         func drawIconBlock(startX: CGFloat) {
             var columnX = startX
             for (index, icon) in icons.enumerated() {
                 let columnWidth = columnWidths[index]
-                placeIcon(centerX: columnX + columnWidth / 2, centerY: iconCenterY, side: iconSide, draw: icon.draw)
-                if captioned {
-                    let capWidth = CGFloat(CTLineGetTypographicBounds(capLines[index], nil, nil, nil))
+                let hasCaption = capLines[index] != nil
+                let side = hasCaption ? iconBand : usedHeight
+                let centerY = hasCaption ? captionedCenterY : fullCenterY
+                placeIcon(centerX: columnX + columnWidth / 2, centerY: centerY, side: side, draw: icon.draw)
+                if let capLine = capLines[index] {
+                    let capWidth = CGFloat(CTLineGetTypographicBounds(capLine, nil, nil, nil))
                     let capBaseline = captionBase + (captionBand - (capAscent + capDescent)) / 2 + capDescent
                     ctx.textPosition = CGPoint(x: columnX + (columnWidth - capWidth) / 2, y: capBaseline)
-                    CTLineDraw(capLines[index], ctx)
+                    CTLineDraw(capLine, ctx)
                 }
                 columnX += columnWidth + iconGap
             }
@@ -303,6 +400,60 @@ enum LabelRenderer {
         func drawText(_ ctLine: CTLine, width lineWidth: CGFloat, centeredIn x0: CGFloat, _ x1: CGFloat) {
             ctx.textPosition = CGPoint(x: x0 + ((x1 - x0) - lineWidth) / 2, y: baseline)
             CTLineDraw(ctLine, ctx)
+        }
+
+        // Draws the dimensioned block: diameter with a ↔ centred beneath it, then
+        // the length with a ↕ beside it, then any custom text. Starts at `startX`.
+        func drawDimensionBlock(startX: CGFloat) {
+            let em = ascent + descent
+            let cy = CGFloat(height) / 2
+            let weight = max(1.2, em * 0.06)
+            let midGap = em * 0.5
+
+            // The diameter number sits over a ↔; centre the (number + gap + arrow)
+            // group vertically so neither the number top nor the arrow clips. Every
+            // number shares this raised baseline.
+            let vgap = em * 0.12
+            let hArrowH = em * 0.26
+            let numBaseline = cy - (ascent - descent - (vgap + hArrowH)) / 2
+
+            var x = startX
+            func advance(_ w: CGFloat) { x += w + midGap }
+
+            // Size (plain text, no arrow).
+            if let dimSizeLine {
+                ctx.textPosition = CGPoint(x: x, y: numBaseline)
+                CTLineDraw(dimSizeLine, ctx)
+                advance(dimSizeWidth)
+            }
+            // Length with a ↕ beside it.
+            if let dimLenLine {
+                ctx.textPosition = CGPoint(x: x, y: numBaseline)
+                CTLineDraw(dimLenLine, ctx)
+                IconRenderer.drawVDoubleArrow(into: ctx, y0: numBaseline - descent, y1: numBaseline + ascent,
+                                              x: x + dimLenWidth + em * 0.35, weight: weight)
+                advance(dimLenWidth + em * 0.7)
+            }
+            // Diameter with a ↔ centred beneath it.
+            if let dimDiaLine {
+                let column = max(dimDiaWidth, em * 0.9)
+                ctx.textPosition = CGPoint(x: x + (column - dimDiaWidth) / 2, y: numBaseline)
+                CTLineDraw(dimDiaLine, ctx)
+                let arrowY = numBaseline - descent - vgap - hArrowH / 2
+                IconRenderer.drawHDoubleArrow(into: ctx, x0: x, x1: x + column, y: arrowY, weight: weight)
+                advance(column)
+            }
+            // Optional internal diameter (plain text).
+            if let dimInnerLine {
+                ctx.textPosition = CGPoint(x: x, y: numBaseline)
+                CTLineDraw(dimInnerLine, ctx)
+                advance(dimInnerWidth)
+            }
+            // Trailing custom text, if any.
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                ctx.textPosition = CGPoint(x: x, y: numBaseline)
+                CTLineDraw(line, ctx)
+            }
         }
 
         if split {
@@ -317,8 +468,12 @@ enum LabelRenderer {
             let blockX = CGFloat(horizontalPadding) + alignOffset
             if iconCount > 0 { drawIconBlock(startX: blockX) }
             let textX = blockX + iconsSlot + (iconCount > 0 ? textGap : 0)
-            ctx.textPosition = CGPoint(x: textX, y: baseline)
-            CTLineDraw(line, ctx)
+            if dimensioned {
+                drawDimensionBlock(startX: textX)
+            } else {
+                ctx.textPosition = CGPoint(x: textX, y: baseline)
+                CTLineDraw(line, ctx)
+            }
         }
 
         guard let raw = ctx.data else {

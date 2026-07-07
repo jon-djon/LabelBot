@@ -61,6 +61,8 @@ enum FastenerCategory: String, CaseIterable, Identifiable, Sendable, Codable {
     var id: String { rawValue }
     /// Whether drive / head / thread options apply.
     var isScrew: Bool { self == .screwBolt }
+    /// Whether a length / depth dimension applies (screws and inserts).
+    var hasLength: Bool { self == .screwBolt || self == .insert }
 }
 
 /// Screw thread style (affects the shaft profile).
@@ -103,6 +105,25 @@ enum LabelAlignment: String, CaseIterable, Identifiable, Sendable, Codable {
         case .leading: "text.alignleft"
         case .center: "text.aligncenter"
         case .trailing: "text.alignright"
+        }
+    }
+}
+
+/// Extra spacing between the label's elements (icons and text).
+enum IconSpacing: String, CaseIterable, Identifiable, Sendable, Codable {
+    case normal = "Default"
+    case wide = "Wide"
+    case wider = "Wider"
+    case widest = "Widest"
+
+    var id: String { rawValue }
+    /// Multiple applied to the gaps between icons and between icons and text.
+    var factor: Double {
+        switch self {
+        case .normal: 1
+        case .wide: 2
+        case .wider: 3
+        case .widest: 4
         }
     }
 }
@@ -161,6 +182,25 @@ enum ScrewOrientation: String, CaseIterable, Identifiable, Sendable, Codable {
         switch self {
         case .vertical: "arrow.up.and.down"
         case .horizontal: "arrow.left.and.right"
+        }
+    }
+}
+
+/// Relative shaft length for a horizontally-oriented screw icon.
+enum ScrewLength: String, CaseIterable, Identifiable, Sendable, Codable {
+    case standard = "Default"
+    case x2 = "2"
+    case x3 = "3"
+    case x4 = "4"
+
+    var id: String { rawValue }
+    /// Length multiple applied to the drawn shaft (1 = default proportions).
+    var factor: Double {
+        switch self {
+        case .standard: 1
+        case .x2: 2
+        case .x3: 3
+        case .x4: 4
         }
     }
 }

@@ -13,21 +13,26 @@ import Foundation
 struct TextSection: Equatable, Codable, Sendable {
     var unit: UnitSystem = .metric
     var sizeMode: SizeEntryMode = .pickers
-    var diameter = SizeTables.metricDiameters[3]   // M3
+    var diameter = SizeTables.metricDiameters[3]   // M3 (thread size)
     var length = SizeTables.metricLengths[3]       // 8
     var sizeText = "M3 × 8"
     var customText = ""
+
+    // Threaded-insert extras: the barrel diameter (drawn with a ↔) and an
+    // optional internal / bore diameter.
+    var outerDiameter = ""
+    var innerDiameter = ""
 
     var availableDiameters: [String] { unit == .metric ? SizeTables.metricDiameters : SizeTables.imperialDiameters }
     var availableLengths: [String] { unit == .metric ? SizeTables.metricLengths : SizeTables.imperialLengths }
 
     /// The size portion of the text, from pickers or the free-text field.
-    func sizeString(isScrew: Bool) -> String {
+    func sizeString(hasLength: Bool) -> String {
         switch sizeMode {
         case .text:
             return sizeText.trimmingCharacters(in: .whitespaces)
         case .pickers:
-            if isScrew {
+            if hasLength {
                 return length.isEmpty ? diameter : "\(diameter) × \(length)"
             }
             return diameter
@@ -35,8 +40,8 @@ struct TextSection: Equatable, Codable, Sendable {
     }
 
     /// Full text: size plus any custom text.
-    func text(isScrew: Bool) -> String {
-        [sizeString(isScrew: isScrew), customText]
+    func text(hasLength: Bool) -> String {
+        [sizeString(hasLength: hasLength), customText]
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: "  ")
@@ -55,6 +60,7 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     // Length + alignment + section layout.
     var lengthMM: Double = LabelLength.auto     // 0 = auto/fit
     var alignment: LabelAlignment = .center
+    var iconSpacing: IconSpacing = .normal      // gap between icons and text
     var textLayout: TextLayout = .single
 
     // Fastener type + icon options.
@@ -63,11 +69,15 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     var head: HeadType = .pan
     var threadKind: ThreadKind = .machine
     var screwOrientation: ScrewOrientation = .vertical
+    var screwLength: ScrewLength = .standard    // horizontal-only shaft length
     var iconStyle: IconStyle = .separate
     var threaded = true
     var nutWasher: NutWasherType = .hexNut
     var showIcons = true
-    var labelIcons = false      // caption each icon with its name
+    // Caption icons with their names — independently for the drive icon and the
+    // screw-type (head) icon. Nut/washer and insert use `labelHead`.
+    var labelDrive = false
+    var labelHead = false
 
     // Text: one section (single) or two (split, one on each side of the icons).
     var text1 = TextSection()
@@ -76,10 +86,21 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     // Batch.
     var copies = 1
 
+    /// Whether the drive icon is shown; toggling off clears it, on restores a default.
+    var includeDrive: Bool {
+        get { drive != .none }
+        set { drive = newValue ? .hex : .none }
+    }
+    /// Whether the screw-type (head) icon is shown.
+    var includeHead: Bool {
+        get { head != .none }
+        set { head = newValue ? .pan : .none }
+    }
+
     /// The primary (left / only) text.
-    var leftText: String { text1.text(isScrew: category.isScrew) }
+    var leftText: String { text1.text(hasLength: category.hasLength) }
     /// The second (right) text, used only in split layout.
-    var rightText: String { text2.text(isScrew: category.isScrew) }
+    var rightText: String { text2.text(hasLength: category.hasLength) }
 
     /// Title shown in the queue row.
     var title: String {

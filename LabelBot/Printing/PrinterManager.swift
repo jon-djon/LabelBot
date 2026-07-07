@@ -40,7 +40,8 @@ final class PrinterManager {
     /// Actual printed size of the current preview, in millimeters.
     private(set) var previewHeightMM = 0.0
     private(set) var previewLengthMM = 0.0
-    private var transport: PrinterTransport?
+    /// Owns the transport and runs all blocking I/O off the main actor.
+    private let connection = PrinterConnection()
 
     init() {
         selection = labels.first?.id
@@ -201,11 +202,10 @@ final class PrinterManager {
         let newTransport: PrinterTransport =
             selectedTransport == .bluetooth ? BluetoothTransport() : USBTransport()
         do {
-            try await Task.detached { try newTransport.connect() }.value
-            transport = newTransport
+            let name = try await connection.connect(newTransport)
             isConnected = true
-            statusText = "Connected to \(newTransport.displayName)"
-            appendLog("Connected via \(selectedTransport.rawValue): \(newTransport.displayName)")
+            statusText = "Connected to \(name)"
+            appendLog("Connected via \(selectedTransport.rawValue): \(name)")
         } catch {
             isConnected = false
             statusText = "Connect failed"
@@ -214,11 +214,12 @@ final class PrinterManager {
     }
 
     func disconnect() {
-        transport?.disconnect()
-        transport = nil
+        // Reflect the change immediately; the actual teardown runs off-main and, being
+        // serialized on the connection actor, waits for any in-flight job to finish.
         isConnected = false
         statusText = "Not connected"
         appendLog("Disconnected")
+        Task { await connection.disconnect() }
     }
 
     // MARK: - Printing
@@ -236,7 +237,7 @@ final class PrinterManager {
 
     private func printSpecs(_ specs: [LabelSpec]) async {
         guard !isBusy else { return }
-        guard let transport else {
+        guard isConnected else {
             statusText = "Not connected"
             appendLog("Print skipped: not connected")
             return
@@ -259,16 +260,7 @@ final class PrinterManager {
         let payload = RasterEncoder.batchJob(pages: pages, tapeWidthMM: tape.widthMM, cutBetween: cutBetween)
         statusText = "Printing \(n) label\(plural)…"
         do {
-            // Wake the printer and let it reach the ready state before the job.
-            // A cold (just-connected) printer otherwise drops the first job silently.
-            let status = try await Task.detached { () -> Data in
-                try transport.send(wake)
-                try transport.send(statusRequest)
-                let reply = (try? transport.readStatus(maxLength: 32, timeout: 3)) ?? Data()
-                try await Task.sleep(for: .milliseconds(200))   // settle time after waking
-                try transport.send(payload)
-                return reply
-            }.value
+            let status = try await connection.run(wake: wake, statusRequest: statusRequest, payload: payload)
             if let issue = Self.statusError(status) {
                 appendLog("Printer reported: \(issue)")
             }

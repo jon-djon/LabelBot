@@ -44,6 +44,7 @@ enum IconRenderer {
     static func drawHead(_ type: HeadType, threadKind: ThreadKind = .machine,
                          threaded: Bool = true,
                          orientation: ScrewOrientation = .vertical,
+                         length: Double = 1,
                          into ctx: CGContext, rect: CGRect) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
@@ -55,13 +56,20 @@ enum IconRenderer {
             ctx.translateBy(x: -rect.midX, y: -rect.midY)
         }
         ctx.setFillColor(gray: 0, alpha: 1)
-        let cx = rect.midX
-        let bottom = rect.minY
-        let top = rect.maxY
-        let h = rect.height
-        let shaftW = rect.width * 0.34
-        let headW = rect.width * 0.82
-        let shaftTop = bottom + h * 0.5
+        // Length only applies horizontally. Draw the profile into a taller-than-wide
+        // sub-rect (width shrinks by the factor) so the shaft lengthens while the head
+        // keeps its size, and it still fits the square after the 90° rotation.
+        let factor = CGFloat(orientation == .horizontal ? max(1, length) : 1)
+        let profileWidth = rect.width / factor
+        let profile = CGRect(x: rect.midX - profileWidth / 2, y: rect.minY,
+                             width: profileWidth, height: rect.height)
+        let cx = profile.midX
+        let bottom = profile.minY
+        let top = profile.maxY
+        let h = profile.height
+        let shaftW = profile.width * 0.34
+        let headW = profile.width * 0.82
+        let shaftTop = top - profile.width * 0.5   // head length = 0.5·diameter, fixed
         // A shaft column: a plain rectangle, or a triangle-threaded (sawtooth-edged)
         // column when `threaded`. Crests reach the full width, roots pull inward.
         func column(from yb: CGFloat, to yt: CGFloat, width w: CGFloat) {
@@ -166,6 +174,7 @@ enum IconRenderer {
     static func drawBolt(head: HeadType, drive: DriveType, threadKind: ThreadKind = .machine,
                          threaded: Bool = true,
                          orientation: ScrewOrientation = .horizontal,
+                         length: Double = 1,
                          into ctx: CGContext, rect: CGRect) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
@@ -175,13 +184,16 @@ enum IconRenderer {
             ctx.translateBy(x: -rect.midX, y: -rect.midY)
         }
 
-        // gflabel: 15 wide for 12 tall → width = 1.456 * height.
-        let gH = min(rect.height, rect.width / 1.456) * 0.98
-        let width = 1.456 * gH
-        let bodyW = 0.856 * gH
+        // gflabel: 15 wide for 12 tall → width = 1.456 * height. Length (horizontal
+        // only) stretches the threaded body while the head keeps its size.
+        let L = CGFloat(orientation == .horizontal ? max(1, length) : 1)
+        let aspect = 0.856 * L + 0.6
+        let gH = min(rect.height, rect.width / aspect) * 0.98
+        let width = aspect * gH
+        let bodyW = 0.856 * L * gH
         let headW = width - bodyW
         let threadDepth = 0.0707 * gH
-        let nThreads = 6
+        let nThreads = max(6, Int((6 * L).rounded()))
         let x0 = -width / 2
         let xHead = bodyW - width / 2
         let pitch = bodyW / CGFloat(nThreads)
@@ -426,6 +438,52 @@ enum IconRenderer {
                 ctx.addPath(p)
                 ctx.fillPath()
             }
+        }
+    }
+
+    // MARK: - Dimension arrows
+
+    /// A horizontal double-headed dimension arrow spanning [x0, x1] centred at y.
+    static func drawHDoubleArrow(into ctx: CGContext, x0: CGFloat, x1: CGFloat, y: CGFloat, weight: CGFloat) {
+        let head = min(weight * 3, (x1 - x0) * 0.4)
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.setStrokeColor(gray: 0, alpha: 1)
+        ctx.setLineWidth(weight)
+        ctx.setLineCap(.round)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: x0 + head * 0.6, y: y))
+        ctx.addLine(to: CGPoint(x: x1 - head * 0.6, y: y))
+        ctx.strokePath()
+        for (tip, dir) in [(x0, CGFloat(1)), (x1, CGFloat(-1))] {
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: tip, y: y))
+            p.addLine(to: CGPoint(x: tip + dir * head, y: y + head * 0.6))
+            p.addLine(to: CGPoint(x: tip + dir * head, y: y - head * 0.6))
+            p.closeSubpath()
+            ctx.addPath(p)
+            ctx.fillPath()
+        }
+    }
+
+    /// A vertical double-headed dimension arrow spanning [y0, y1] centred at x.
+    static func drawVDoubleArrow(into ctx: CGContext, y0: CGFloat, y1: CGFloat, x: CGFloat, weight: CGFloat) {
+        let head = min(weight * 3, (y1 - y0) * 0.4)
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.setStrokeColor(gray: 0, alpha: 1)
+        ctx.setLineWidth(weight)
+        ctx.setLineCap(.round)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: x, y: y0 + head * 0.6))
+        ctx.addLine(to: CGPoint(x: x, y: y1 - head * 0.6))
+        ctx.strokePath()
+        for (tip, dir) in [(y0, CGFloat(1)), (y1, CGFloat(-1))] {
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: x, y: tip))
+            p.addLine(to: CGPoint(x: x + head * 0.6, y: tip + dir * head))
+            p.addLine(to: CGPoint(x: x - head * 0.6, y: tip + dir * head))
+            p.closeSubpath()
+            ctx.addPath(p)
+            ctx.fillPath()
         }
     }
 
