@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FC5C78542FFAF4F300DA5776 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = FC5C78532FFAF4F300DA5776 /* AppIcon.icon */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		FC551FD12FF9688300EE5BDF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		FC551FC32FF9688200EE5BDF /* LabelBot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LabelBot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC551FD02FF9688300EE5BDF /* LabelBotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LabelBotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC551FDA2FF9688300EE5BDF /* LabelBotUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LabelBotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC5C78532FFAF4F300DA5776 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -75,6 +80,7 @@
 		FC551FBA2FF9688200EE5BDF = {
 			isa = PBXGroup;
 			children = (
+				FC5C78532FFAF4F300DA5776 /* AppIcon.icon */,
 				FC551FC52FF9688200EE5BDF /* LabelBot */,
 				FC551FD32FF9688300EE5BDF /* LabelBotTests */,
 				FC551FDD2FF9688300EE5BDF /* LabelBotUITests */,
@@ -212,6 +218,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FC5C78542FFAF4F300DA5776 /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
