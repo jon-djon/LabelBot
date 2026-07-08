@@ -22,7 +22,7 @@ struct IconOptionsRow: View {
                 .fixedSize()
             } else {
                 Toggle("Label icon", isOn: $printer.current.labelHead)
-                    .toggleStyle(.switch)
+                    .toggleStyle(.checkbox)
                     .help("Print the icon's name beneath it")
             }
             Spacer()

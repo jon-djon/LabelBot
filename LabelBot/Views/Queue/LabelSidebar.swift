@@ -42,6 +42,7 @@ struct LabelSidebar: View {
 
                 Divider()
                 Toggle("Cut between labels", isOn: $printer.cutBetween)
+                    .toggleStyle(.checkbox)
                     .font(.callout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

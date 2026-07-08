@@ -16,7 +16,7 @@ struct ScrewIconGrids: View {
                     Toggle("Include drive type", isOn: $printer.current.includeDrive)
                         .toggleStyle(.checkbox)
                     Toggle("Label", isOn: $printer.current.labelDrive)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.checkbox)
                         .disabled(printer.current.drive == .none)
                         .help("Print the drive name beneath the icon")
                     Spacer()
@@ -39,7 +39,7 @@ struct ScrewIconGrids: View {
 
                     RowDivider()
                     Toggle("Label", isOn: $printer.current.labelHead)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.checkbox)
                         .disabled(printer.current.head == .none)
                         .help("Print the screw-type name beneath the icon")
 
@@ -56,7 +56,7 @@ struct ScrewIconGrids: View {
 
                     RowDivider()
                     Toggle("Threads", isOn: $printer.current.threaded)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.checkbox)
 
                     if printer.current.screwOrientation == .horizontal {
                         RowDivider()

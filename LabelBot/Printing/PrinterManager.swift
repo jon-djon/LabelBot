@@ -22,7 +22,7 @@ final class PrinterManager {
         var id: String { rawValue }
     }
 
-    var selectedTransport: TransportKind = .bluetooth
+    var selectedTransport: TransportKind = .usb
     var statusText = "Not connected"
     var isConnected = false
     var isBusy = false
@@ -187,12 +187,6 @@ final class PrinterManager {
     }
 
     // MARK: - Connection
-
-    /// Enumerates Brother USB devices so we can confirm the real product id / layout.
-    func scanUSB() {
-        appendLog("USB scan:")
-        USBTransport.scan().forEach { appendLog("  • \($0)") }
-    }
 
     func connect() async {
         guard !isBusy else { return }

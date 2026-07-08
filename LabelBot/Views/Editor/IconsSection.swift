@@ -13,7 +13,7 @@ struct IconsSection: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Show icons", isOn: $printer.current.showIcons)
-                    .toggleStyle(.switch)
+                    .toggleStyle(.checkbox)
 
                 IconOptionsRow(printer: printer)
                     .disabled(!printer.current.showIcons)

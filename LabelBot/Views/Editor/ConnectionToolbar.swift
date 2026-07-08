@@ -23,14 +23,20 @@ struct ConnectionToolbar: ToolbarContent {
             .help("Connection transport")
         }
 
-        if printer.selectedTransport == .usb {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    printer.scanUSB()
+        ToolbarItem(placement: .navigation) {
+            if printer.isConnected {
+                Button(role: .destructive) {
+                    printer.disconnect()
                 } label: {
-                    Label("Scan USB", systemImage: "magnifyingglass")
+                    Label("Disconnect", systemImage: "cable.connector.slash")
                 }
-                .help("Scan for Brother USB devices")
+            } else {
+                Button {
+                    Task { await printer.connect() }
+                } label: {
+                    Label("Connect", systemImage: "cable.connector")
+                }
+                .disabled(printer.isBusy)
             }
         }
 
@@ -68,21 +74,6 @@ struct ConnectionToolbar: ToolbarContent {
 
         ToolbarItemGroup(placement: .primaryAction) {
             if printer.isBusy { ProgressView().controlSize(.small) }
-
-            if printer.isConnected {
-                Button(role: .destructive) {
-                    printer.disconnect()
-                } label: {
-                    Label("Disconnect", systemImage: "cable.connector.slash")
-                }
-            } else {
-                Button {
-                    Task { await printer.connect() }
-                } label: {
-                    Label("Connect", systemImage: "cable.connector")
-                }
-                .disabled(printer.isBusy)
-            }
 
             Button {
                 Task { await printer.printAll() }
