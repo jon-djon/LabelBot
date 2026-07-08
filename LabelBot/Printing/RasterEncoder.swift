@@ -66,21 +66,25 @@ nonisolated enum RasterEncoder {
         data.append(contentsOf: [0x1B, 0x69, 0x21, 0x00])  // ESC i !  status notify off
         // ESC i M  mode: auto-cut on (0x40) when cutting between labels.
         data.append(contentsOf: [0x1B, 0x69, 0x4D, cutBetween ? 0x40 : 0x00])
-        // ESC i A  cut every n labels — 1 = cut after each.
-        if cutBetween { data.append(contentsOf: [0x1B, 0x69, 0x41, 0x01]) }
-        // ESC i K  advanced mode: no chain printing (0x08).
+        // ESC i K  advanced mode: no chain printing (0x08) — feed + cut after the last label.
+        // (ESC i A "cut every n labels" is intentionally omitted: the PT-P710BT does not
+        // support it, and auto-cut above already cuts each page.)
         data.append(contentsOf: [0x1B, 0x69, 0x4B, 0x08])
 
         // --- Pages ---
         for (index, lines) in pages.enumerated() {
             // ESC i z  print information: flags 0x84, media type, width, length,
             // 4-byte LE raster-line count, then n9/n10.
+            // n9 = starting-page flag: 0 for the first page, 1 for every later page.
+            // Sending 0 on every page makes the printer treat each label as a fresh job
+            // and stall before the final feed/cut, so it must increment here.
             let n = UInt32(lines.count)
+            let startingPage: UInt8 = index == 0 ? 0x00 : 0x01
             data.append(contentsOf: [0x1B, 0x69, 0x7A,
                 0x84, 0x00, tapeWidthMM, 0x00,
                 UInt8(n & 0xFF), UInt8((n >> 8) & 0xFF),
                 UInt8((n >> 16) & 0xFF), UInt8((n >> 24) & 0xFF),
-                0x00, 0x00])
+                startingPage, 0x00])
             data.append(contentsOf: [0x1B, 0x69, 0x64, 0x00, 0x00])  // ESC i d  margin
             data.append(contentsOf: [0x4D, 0x02])                    // M  TIFF/PackBits
 

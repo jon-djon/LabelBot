@@ -111,24 +111,38 @@ nonisolated final class USBTransport: PrinterTransport, @unchecked Sendable {
         }
     }
 
+    /// Bytes per bulk-OUT request. A whole multi-label batch cannot go in one request:
+    /// the transfer only completes once the printer has accepted every byte, but the
+    /// printer NAKs input while it physically prints and cuts each label, so a big job
+    /// blows past a single timeout mid-print (kIOReturnTimeout) and the trailing bytes —
+    /// including the final cut command — never arrive. Sending in chunks lets each
+    /// transfer complete as buffer space frees up. 8 KB = 16 × the 512-byte bulk packet.
+    private static let chunkSize = 8192
+
     func send(_ data: Data) throws {
         guard let outPipe else { throw TransportError.notConnected }
-        let payload = NSMutableData(data: data)
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: IOReturn = kIOReturnSuccess
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + Self.chunkSize, data.count)
+            let chunk = NSMutableData(data: data.subdata(in: offset..<end))
+            let semaphore = DispatchSemaphore(value: 0)
+            var result: IOReturn = kIOReturnSuccess
 
-        // Completions fire on the interface's internal queue; block until done.
-        do {
-            try outPipe.enqueueIORequest(with: payload, completionTimeout: 10) { status, _ in
-                result = status
-                semaphore.signal()
+            // Completions fire on the interface's internal queue; block until done.
+            // Timeout is per chunk, so total transfer time scales with the batch.
+            do {
+                try outPipe.enqueueIORequest(with: chunk, completionTimeout: 15) { status, _ in
+                    result = status
+                    semaphore.signal()
+                }
+            } catch {
+                throw TransportError.writeFailed(error.localizedDescription)
             }
-        } catch {
-            throw TransportError.writeFailed(error.localizedDescription)
-        }
-        semaphore.wait()
-        guard result == kIOReturnSuccess else {
-            throw TransportError.writeFailed("bulk OUT returned \(result)")
+            semaphore.wait()
+            guard result == kIOReturnSuccess else {
+                throw TransportError.writeFailed("bulk OUT returned \(result) at offset \(offset)")
+            }
+            offset = end
         }
     }
 
