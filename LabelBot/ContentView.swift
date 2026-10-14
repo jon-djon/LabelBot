@@ -25,8 +25,10 @@ struct ContentView: View {
                         CategorySection(printer: printer)
                         Divider()
                         TextEditorSection(printer: printer)
-                        Divider()
-                        IconsSection(printer: printer)
+                        if printer.current.category.isFastener {
+                            Divider()
+                            IconsSection(printer: printer)
+                        }
                     }
                     .padding(20)
                 }

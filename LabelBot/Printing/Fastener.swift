@@ -9,7 +9,7 @@
 import Foundation
 
 enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
-    case none, hex, torx, torx15, torx25, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
+    case none, hex, torx, torx15, torx25, torx30, securityTorx, phillips, pozidriv, robertson, slotted, externalHex
 
     var id: String { rawValue }
     var displayName: String {
@@ -19,6 +19,7 @@ enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
         case .torx: "Torx"
         case .torx15: "T-15"
         case .torx25: "T-25"
+        case .torx30: "T-30"
         case .securityTorx: "Security Torx"
         case .phillips: "Phillips"
         case .pozidriv: "Pozidriv"
@@ -30,7 +31,7 @@ enum DriveType: String, CaseIterable, Identifiable, Sendable, Codable {
 }
 
 enum HeadType: String, CaseIterable, Identifiable, Sendable, Codable {
-    case none, countersunk, socketCap, pan, button, hex, flangeHex, grub
+    case none, countersunk, socketCap, pan, button, hex, flangeHex, grub, flat
 
     var id: String { rawValue }
     var displayName: String {
@@ -43,13 +44,16 @@ enum HeadType: String, CaseIterable, Identifiable, Sendable, Codable {
         case .hex: "Hex"
         case .flangeHex: "Flange Hex"
         case .grub: "Grub / Set"
+        case .flat: "Flat"
         }
     }
 }
 
 extension HeadType {
     /// Head styles offered for wood screws (always have a head).
-    static let woodHeads: [HeadType] = [.countersunk, .pan, .button, .hex]
+    static let woodHeads: [HeadType] = [.countersunk, .flat, .pan, .button, .hex]
+    /// Head styles offered for machine screws (flat is wood-only).
+    static let machineHeads: [HeadType] = allCases.filter { $0 != .none && $0 != .flat }
 }
 
 /// Top-level kind of fastener being labeled.
@@ -57,8 +61,11 @@ enum FastenerCategory: String, CaseIterable, Identifiable, Sendable, Codable {
     case screwBolt = "Screws / Bolts"
     case nutWasher = "Nuts & Washers"
     case insert = "Threaded Inserts"
+    case text = "Text Only"
 
     var id: String { rawValue }
+    /// Whether the label carries fastener icons and a size (everything but text-only).
+    var isFastener: Bool { self != .text }
     /// Whether drive / head / thread options apply.
     var isScrew: Bool { self == .screwBolt }
     /// Whether a length / depth dimension applies (screws and inserts).
@@ -128,11 +135,73 @@ enum IconSpacing: String, CaseIterable, Identifiable, Sendable, Codable {
     }
 }
 
+/// Size of the label's icon(s) relative to the default band-filling size, so the
+/// icon can be made smaller than the text. Applies to every category.
+enum IconSize: String, CaseIterable, Identifiable, Sendable, Codable {
+    case normal = "Default"
+    case small = "Small"
+    case smaller = "Smaller"
+
+    var id: String { rawValue }
+    /// Multiple applied to the drawn icon and its column.
+    var factor: Double {
+        switch self {
+        case .normal: 1
+        case .small: 0.8
+        case .smaller: 0.62
+        }
+    }
+}
+
+/// Enlarges the label content past the automatic fit. With a fixed length the
+/// content is normally shrunk to fit the tape, which can leave the text small and
+/// the band half-empty; a higher zoom scales the text + icons back up (up to
+/// filling the tape width) and lets the label grow longer than requested.
+enum LabelZoom: String, CaseIterable, Identifiable, Sendable, Codable {
+    case fit = "Fit"
+    case large = "1.5×"
+    case larger = "2×"
+    case max = "Max"
+
+    var id: String { rawValue }
+    /// Multiple applied to the fitted content scale; clamped to the tape band when
+    /// rendered. `.max` is large enough to always fill the band.
+    var factor: Double {
+        switch self {
+        case .fit: 1
+        case .large: 1.5
+        case .larger: 2
+        case .max: 100
+        }
+    }
+}
+
+/// Blank space added before and after the label's content (icons + text). With a
+/// fixed length the content shrinks to make room, so the length still holds.
+enum LabelPadding: String, CaseIterable, Identifiable, Sendable, Codable {
+    case off = "None"   // not `.none`, which collides with Optional.none
+    case small = "2 mm"
+    case medium = "5 mm"
+    case large = "10 mm"
+    case extraLarge = "15 mm"
+
+    var id: String { rawValue }
+    var mm: Double {
+        switch self {
+        case .off: 0
+        case .small: 2
+        case .medium: 5
+        case .large: 10
+        case .extraLarge: 15
+        }
+    }
+}
+
 /// Fixed print lengths (mm) offered alongside the "Auto" (fit-to-content) option.
 /// Lengths are stored in mm; Gridfinity sizes are just a convenience mapping.
 enum LabelLength {
     static let auto: Double = 0   // sentinel: size to content
-    static let presetsMM: [Double] = [15, 20, 25, 30, 40, 50, 60, 80, 100]
+    static let presetsMM: [Double] = [15, 20, 25, 30, 40, 50, 60, 80, 100, 120, 140, 160, 180, 200]
 
     /// One Gridfinity unit is 35 mm.
     static let gridfinityMM: Double = 35
@@ -208,9 +277,17 @@ enum ScrewLength: String, CaseIterable, Identifiable, Sendable, Codable {
 /// Standard fastener sizes for the guided pickers.
 enum SizeTables {
     static let metricDiameters = ["M1.6", "M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12"]
-    static let imperialDiameters = ["#2", "#4", "#6", "#8", "#10", "#12", "1/4\"", "5/16\"", "3/8\"", "1/2\""]
-    static let metricLengths = ["4", "5", "6", "8", "10", "12", "16", "20", "25", "30", "40", "50"]
-    static let imperialLengths = ["1/4\"", "3/8\"", "1/2\"", "5/8\"", "3/4\"", "1\"", "1-1/4\"", "1-1/2\"", "1-3/4\"",
-                                  "2\"", "2-1/4\"", "2-1/2\"", "2-3/4\"", "3\"", "3-1/4\"", "3-1/2\"", "3-3/4\"",
-                                  "4\"", "4-1/4\"", "4-1/2\"", "4-3/4\"", "5\""]
+    static let imperialDiameters = (1...20).map { "#\($0)" } + ["1/4\"", "5/16\"", "3/8\"", "1/2\""]
+    static let metricLengths = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "16", "20", "25", "30", "40", "50"]
+    /// Every whole inch up to 10", each followed by its 1/8" steps (stopping at 10").
+    static let imperialLengths: [String] = {
+        let fractions = ["1/8", "1/4", "3/8", "1/2", "5/8", "3/4", "7/8"]
+        var lengths: [String] = []
+        for inch in 0...10 {
+            if inch > 0 { lengths.append("\(inch)\"") }
+            guard inch < 10 else { break }
+            lengths += fractions.map { inch == 0 ? "\($0)\"" : "\(inch)-\($0)\"" }
+        }
+        return lengths
+    }()
 }

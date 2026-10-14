@@ -41,11 +41,15 @@ struct LabelSidebar: View {
                 .padding(.vertical, 6)
 
                 Divider()
-                Toggle("Cut between labels", isOn: $printer.cutBetween)
-                    .toggleStyle(.checkbox)
-                    .font(.callout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Cut between labels", isOn: $printer.cutBetween)
+                    Toggle("High quality (360 dpi)", isOn: $printer.highRes)
+                        .help("Print at double resolution along the length for smoother edges (slower)")
+                }
+                .toggleStyle(.checkbox)
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
             .background(.bar)
         }

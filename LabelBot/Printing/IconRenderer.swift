@@ -96,14 +96,15 @@ enum IconRenderer {
             ctx.addPath(path)
             ctx.fillPath()
         }
-        func shaft() {
+        // The shaft runs from the bottom up to `end` (the underside of the head).
+        func shaft(to end: CGFloat = shaftTop) {
             guard threadKind == .wood else {
-                column(from: bottom, to: shaftTop, width: shaftW)
+                column(from: bottom, to: end, width: shaftW)
                 return
             }
             // Wood screw: threaded (or plain) column above a pointed tip.
-            let tip = (shaftTop - bottom) * 0.35
-            column(from: bottom + tip, to: shaftTop, width: shaftW)
+            let tip = (end - bottom) * 0.35
+            column(from: bottom + tip, to: end, width: shaftW)
             let p = CGMutablePath()
             p.move(to: CGPoint(x: cx - shaftW / 2, y: bottom + tip))
             p.addLine(to: CGPoint(x: cx + shaftW / 2, y: bottom + tip))
@@ -154,6 +155,10 @@ enum IconRenderer {
             p.closeSubpath()
             ctx.addPath(p)
             ctx.fillPath()
+        case .flat: // low wafer: a thin, wide disc with a flat top and underside
+            let discH = (top - shaftTop) * 0.4
+            shaft(to: top - discH)
+            ctx.fill(CGRect(x: cx - headW / 2, y: top - discH, width: headW, height: discH))
         case .flangeHex:
             shaft()
             let flangeH = (top - shaftTop) * 0.22
@@ -199,6 +204,8 @@ enum IconRenderer {
         let pitch = bodyW / CGFloat(nThreads)
         let tip = gH / 4 + threadDepth
         let hh = gH / 2
+        // A flat head is a thin disc, so it starts nearer the end than other heads.
+        let xFlatDisc = width / 2 - headW * 0.55
         let cx = rect.midX, cy = rect.midY
         func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: cx + x, y: cy + y) }
 
@@ -235,6 +242,12 @@ enum IconRenderer {
             top.append(P(xHead, hh))
             appendArc(&top, center: P(width / 2 - hh, 0), radius: hh, from: .pi / 2, to: 0)
             top.append(P(width / 2, 0))
+        case .flat:
+            // Thin full-height disc at the end; the body runs on up to it.
+            top.append(P(xFlatDisc, top.last!.y - cy))
+            top.append(P(xFlatDisc, hh))
+            top.append(P(width / 2, hh))
+            top.append(P(width / 2, 0))
         case .grub, .none:
             top.append(P(xHead, 0))
         }
@@ -256,9 +269,12 @@ enum IconRenderer {
         let hasHead = head != .none && head != .grub
         if hasHead {
             let fudge = threadDepth / 2
-            let center = P(width / 2 - headW / 2 - fudge, 0)
-            let r = headW * 0.9 / 2
-            let cutRadius = (headW / 2) / (headW * 0.9 / 2)   // slot overshoot to reach the edge
+            // The flat head's disc is thinner, so its recess is centred on (and sized
+            // to) the disc instead of the full head width.
+            let faceW = head == .flat ? width / 2 - xFlatDisc : headW
+            let center = P(width / 2 - faceW / 2 - (head == .flat ? 0 : fudge), 0)
+            let r = faceW * 0.9 / 2
+            let cutRadius = (faceW / 2) / r   // slot overshoot to reach the edge
             fillDriveCut(drive, center: center, radius: r, cutRadius: cutRadius, into: ctx)
         }
     }
@@ -289,7 +305,7 @@ enum IconRenderer {
             ctx.fillPath()
         case .robertson:
             fillRect(ctx, c, 0.6 * d, 0.6 * d, .pi / 4)
-        case .torx, .torx15, .torx25:
+        case .torx, .torx15, .torx25, .torx30:
             fillTorx(ctx, center: c, radius: r)
         case .securityTorx:
             fillTorx(ctx, center: c, radius: r)

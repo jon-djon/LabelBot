@@ -54,22 +54,35 @@ nonisolated enum RasterEncoder {
     /// Builds one job that prints several labels ("pages") in order. With
     /// `cutBetween`, auto-cut fires after every label (print → cut → print → cut);
     /// pages other than the last end with the "print" command (0x0C) and the last
-    /// ends with "print + feed" (0x1A).
-    static func batchJob(pages: [[[UInt8]]], tapeWidthMM: UInt8, cutBetween: Bool) -> Data {
+    /// ends with "print + feed" (0x1A). `highRes` prints at 360 dpi along the length
+    /// (the caller must supply raster lines rendered at that doubled resolution).
+    static func batchJob(pages: [[[UInt8]]], tapeWidthMM: UInt8, cutBetween: Bool, highRes: Bool = false) -> Data {
+        batchJobWithPageEnds(pages: pages, tapeWidthMM: tapeWidthMM, cutBetween: cutBetween, highRes: highRes).data
+    }
+
+    /// Same as `batchJob`, plus the byte offset just past each page's print command,
+    /// so a sender can report which label is on the wire.
+    static func batchJobWithPageEnds(pages: [[[UInt8]]], tapeWidthMM: UInt8, cutBetween: Bool,
+                                     highRes: Bool = false) -> (data: Data, pageEnds: [Int]) {
         var data = Data()
+        var pageEnds: [Int] = []
 
         // --- Job header (sent once) ---
         // Invalidate: 100 null bytes flush any half-finished command in the buffer.
         data.append(Data(repeating: 0x00, count: 100))
         data.append(contentsOf: [0x1B, 0x40])              // ESC @  initialize
         data.append(contentsOf: [0x1B, 0x69, 0x61, 0x01])  // ESC i a  raster mode
-        data.append(contentsOf: [0x1B, 0x69, 0x21, 0x00])  // ESC i !  status notify off
+        // ESC i !  automatic status notification: 0x01 = do not notify (0x00, the
+        // default, makes the printer push a status reply at each page's phase change,
+        // which backs up over USB and stalls the job a few labels in).
+        data.append(contentsOf: [0x1B, 0x69, 0x21, 0x01])
         // ESC i M  mode: auto-cut on (0x40) when cutting between labels.
         data.append(contentsOf: [0x1B, 0x69, 0x4D, cutBetween ? 0x40 : 0x00])
-        // ESC i K  advanced mode: no chain printing (0x08) — feed + cut after the last label.
+        // ESC i K  advanced mode: no chain printing (0x08) — feed + cut after the last
+        // label — plus high-resolution printing (bit 6, 0x40) for 360-dpi-long output.
         // (ESC i A "cut every n labels" is intentionally omitted: the PT-P710BT does not
         // support it, and auto-cut above already cuts each page.)
-        data.append(contentsOf: [0x1B, 0x69, 0x4B, 0x08])
+        data.append(contentsOf: [0x1B, 0x69, 0x4B, highRes ? 0x48 : 0x08])
 
         // --- Pages ---
         for (index, lines) in pages.enumerated() {
@@ -92,9 +105,10 @@ nonisolated enum RasterEncoder {
 
             // Last page prints + feeds/cuts (0x1A); earlier pages just print (0x0C).
             data.append(index == pages.count - 1 ? 0x1A : 0x0C)
+            pageEnds.append(data.count)
         }
 
-        return data
+        return (data, pageEnds)
     }
 
     /// Appends raster lines: 0x5A for an all-zero line, else 0x47 + LE16 length + packbits.

@@ -16,7 +16,7 @@ struct PreviewSection: View {
                     RoundedRectangle(cornerRadius: Design.cornerRadius).fill(.white)
                     if let preview = printer.preview {
                         Image(nsImage: preview)
-                            .interpolation(.none)
+                            .interpolation(.high)
                             .resizable()
                             .scaledToFit()
                             .frame(maxWidth: .infinity, alignment: previewAlignment)

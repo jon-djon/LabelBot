@@ -25,6 +25,16 @@ struct IconOptionsRow: View {
                     .toggleStyle(.checkbox)
                     .help("Print the icon's name beneath it")
             }
+
+            RowDivider()
+
+            FieldLabel("Size")
+            Picker("Size", selection: $printer.current.iconSize) {
+                ForEach(IconSize.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+
             Spacer()
         }
     }

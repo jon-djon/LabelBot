@@ -61,6 +61,14 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     var lengthMM: Double = LabelLength.auto     // 0 = auto/fit
     var alignment: LabelAlignment = .center
     var iconSpacing: IconSpacing = .normal      // gap between icons and text
+    var zoom: LabelZoom = .fit                  // enlarge content past the fit-to-length
+    // Blank space before and after the content. Optional so batches saved before
+    // it existed still decode; nil means none.
+    var padding: LabelPadding? = nil
+    var border = false                          // draw a box around the whole label
+    var sizeBorder = false                       // draw a box around just the size (e.g. M3)
+    var boldText = false                         // bold every text, not just the size
+    var fontName: String? = nil                  // font family; nil = system font
     var textLayout: TextLayout = .single
 
     // Fastener type + icon options.
@@ -71,6 +79,7 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     var screwOrientation: ScrewOrientation = .vertical
     var screwLength: ScrewLength = .standard    // horizontal-only shaft length
     var iconStyle: IconStyle = .separate
+    var iconSize: IconSize = .normal            // shrink icons relative to the text
     var threaded = true
     var nutWasher: NutWasherType = .hexNut
     var showIcons = true
@@ -98,9 +107,16 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
     }
 
     /// The primary (left / only) text.
-    var leftText: String { text1.text(hasLength: category.hasLength) }
+    var leftText: String { text(of: text1) }
     /// The second (right) text, used only in split layout.
-    var rightText: String { text2.text(hasLength: category.hasLength) }
+    var rightText: String { text(of: text2) }
+
+    /// A section's full text; text-only labels have no size, just the custom text.
+    private func text(of section: TextSection) -> String {
+        category.isFastener
+            ? section.text(hasLength: category.hasLength)
+            : section.customText.trimmingCharacters(in: .whitespaces)
+    }
 
     /// Title shown in the queue row.
     var title: String {
@@ -119,6 +135,8 @@ struct LabelSpec: Identifiable, Equatable, Codable, Sendable {
             return nutWasher.displayName
         case .insert:
             return "Threaded insert"
+        case .text:
+            return "Text"
         }
     }
 }

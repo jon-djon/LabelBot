@@ -27,10 +27,22 @@ final class PrinterManager {
     var isConnected = false
     var isBusy = false
     private(set) var log: [String] = []
+    /// Width of the cassette in the printer, from the last status reply (0 = none
+    /// loaded); nil when not connected or never read. Updated on connect and before
+    /// each print, so a cassette swapped while idle shows up at the next print.
+    private(set) var loadedTapeMM: UInt8?
+
+    /// The loaded tape, when it's a supported width that differs from the setting.
+    var mismatchedLoadedTape: TapeSize? {
+        guard isConnected, let loadedTapeMM, loadedTapeMM != tape.widthMM else { return nil }
+        return TapeSize.all.first { $0.widthMM == loadedTapeMM }
+    }
 
     // Shared output settings (one physical tape feeds the whole batch).
     var tape: TapeSize = .tape24 { didSet { updatePreview() } }
     var cutBetween = true
+    /// Print at 360 dpi along the length (smoother edges, ~2× data/time).
+    var highRes = true { didSet { updatePreview() } }
 
     // The batch of labels and the one currently being edited.
     var labels: [LabelSpec] = [LabelSpec()] { didSet { updatePreview() } }
@@ -121,8 +133,12 @@ final class PrinterManager {
         for token in tokens {
             var spec = template
             spec.id = UUID()
-            spec.text1.sizeMode = .text
-            spec.text1.sizeText = token
+            if spec.category.isFastener {
+                spec.text1.sizeMode = .text
+                spec.text1.sizeText = token
+            } else {
+                spec.text1.customText = token
+            }
             spec.copies = 1
             new.append(spec)
         }
@@ -138,7 +154,7 @@ final class PrinterManager {
     }
 
     func updatePreview() {
-        let rendered = LabelRenderer.render(current, tape: tape)
+        let rendered = LabelRenderer.render(current, tape: tape, highRes: highRes)
         preview = rendered.preview
         previewHeightMM = Double(tape.widthMM)
         previewLengthMM = Double(rendered.lengthDots) / LabelRenderer.dotsPerMM
@@ -200,6 +216,10 @@ final class PrinterManager {
             isConnected = true
             statusText = "Connected to \(name)"
             appendLog("Connected via \(selectedTransport.rawValue): \(name)")
+            if let status = try? await connection.wakeAndReadStatus(
+                wake: RasterEncoder.initialize, statusRequest: RasterEncoder.statusRequest, log: logger) {
+                _ = matchLoadedTape(status, askBeforeSwitching: false)
+            }
         } catch {
             isConnected = false
             statusText = "Connect failed"
@@ -211,6 +231,7 @@ final class PrinterManager {
         // Reflect the change immediately; the actual teardown runs off-main and, being
         // serialized on the connection actor, waits for any in-flight job to finish.
         isConnected = false
+        loadedTapeMM = nil
         statusText = "Not connected"
         appendLog("Disconnected")
         Task { await connection.disconnect() }
@@ -239,48 +260,124 @@ final class PrinterManager {
         isBusy = true
         defer { isBusy = false }
 
+        // Check the loaded tape before rendering: a job whose width doesn't match the
+        // cassette is rejected by the printer (red light), so adopt the real width.
+        let log = logger
+        let status: Data
+        do {
+            status = try await connection.wakeAndReadStatus(
+                wake: RasterEncoder.initialize, statusRequest: RasterEncoder.statusRequest, log: log)
+        } catch {
+            await Self.flushMainQueue()
+            appendLog("Print error: \(error.localizedDescription)")
+            statusText = "Print failed"
+            return
+        }
+        await Self.flushMainQueue()
+        switch matchLoadedTape(status, askBeforeSwitching: true) {
+        case .ok:
+            break
+        case .cancelled:
+            statusText = "Print cancelled"
+            return
+        case .unprintable:
+            statusText = "Print stopped — check tape"
+            return
+        }
+
         let tape = self.tape
-        let pages = specs
-            .map { LabelRenderer.render($0, tape: tape).rasterLines }
-            .filter { !$0.isEmpty }
+        let highRes = self.highRes
+        appendLog("Print requested: \(specs.count) label\(specs.count == 1 ? "" : "s") on \(tape.label), "
+                  + "high-res \(highRes ? "on" : "off"), cut between \(cutBetween ? "on" : "off")")
+        var pages: [[[UInt8]]] = []
+        for (index, spec) in specs.enumerated() {
+            let rendered = LabelRenderer.render(spec, tape: tape, highRes: highRes)
+            guard !rendered.rasterLines.isEmpty else {
+                appendLog("Skipping label \(index + 1) (\(spec.title)): nothing to print")
+                continue
+            }
+            let lengthMM = Double(rendered.lengthDots) / LabelRenderer.dotsPerMM
+            appendLog("Rendered label \(pages.count + 1): \(spec.title) — "
+                      + "\(lengthMM.formatted(.number.precision(.fractionLength(1)))) mm, \(rendered.rasterLines.count) lines")
+            pages.append(rendered.rasterLines)
+        }
         guard !pages.isEmpty else {
             appendLog("Nothing to print")
             return
         }
         let n = pages.count
         let plural = n == 1 ? "" : "s"
-        let wake = RasterEncoder.initialize
-        let statusRequest = RasterEncoder.statusRequest
-        let payload = RasterEncoder.batchJob(pages: pages, tapeWidthMM: tape.widthMM, cutBetween: cutBetween)
+        let (payload, pageEnds) = RasterEncoder.batchJobWithPageEnds(
+            pages: pages, tapeWidthMM: tape.widthMM, cutBetween: cutBetween, highRes: highRes)
         statusText = "Printing \(n) label\(plural)…"
         do {
-            let status = try await connection.run(wake: wake, statusRequest: statusRequest, payload: payload)
-            if let issue = Self.statusError(status) {
-                appendLog("Printer reported: \(issue)")
-            }
+            try await connection.send(payload: payload, pageEnds: pageEnds, log: log)
+            await Self.flushMainQueue()
             appendLog("Printed \(n) label\(plural) — \(tape.label) (\(payload.count) B)")
             statusText = "Printed \(n) label\(plural)"
         } catch {
+            await Self.flushMainQueue()
             appendLog("Print error: \(error.localizedDescription)")
             statusText = "Print failed"
         }
     }
 
-    /// Decodes the error bytes (offsets 8–9) of a 32-byte status reply, if any.
-    private static func statusError(_ status: Data) -> String? {
-        guard status.count >= 10 else { return nil }
-        let e1 = status[status.startIndex + 8]
-        let e2 = status[status.startIndex + 9]
-        guard e1 != 0 || e2 != 0 else { return nil }
-        var reasons: [String] = []
-        if e1 & 0x01 != 0 { reasons.append("no media") }
-        if e1 & 0x04 != 0 { reasons.append("cut jam") }
-        if e1 & 0x08 != 0 { reasons.append("weak batteries") }
-        if e1 & 0x40 != 0 { reasons.append("high voltage adapter") }
-        if e2 & 0x01 != 0 { reasons.append("wrong media") }
-        if e2 & 0x10 != 0 { reasons.append("cover open") }
-        if e2 & 0x20 != 0 { reasons.append("overheated") }
-        if reasons.isEmpty { reasons.append(String(format: "error 0x%02X 0x%02X", e1, e2)) }
-        return reasons.joined(separator: ", ")
+    /// Progress lines come from the connection actor; this hops them to the main
+    /// queue (FIFO, so they stay in order) and appends them to the log.
+    private var logger: @Sendable (String) -> Void {
+        { [weak self] line in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.appendLog(line) } }
+        }
+    }
+
+    enum TapeCheck { case ok, cancelled, unprintable }
+
+    /// Checks a status reply against the tape setting. On a width mismatch it switches
+    /// to the loaded tape — silently on connect, or after asking when
+    /// `askBeforeSwitching` (before a print). Returns `.unprintable` (after logging why)
+    /// for a printer error, no tape, or a width this app can't print. With no reply the
+    /// current setting is kept.
+    private func matchLoadedTape(_ status: Data, askBeforeSwitching: Bool) -> TapeCheck {
+        if let width = PrinterStatus.tapeWidthMM(status) { loadedTapeMM = width }
+        if let issue = PrinterStatus.errors(status) {
+            appendLog("Printer reported: \(issue)")
+            return .unprintable
+        }
+        guard let width = PrinterStatus.tapeWidthMM(status) else {
+            appendLog("Couldn't read the loaded tape width — using the \(tape.label) setting")
+            return .ok
+        }
+        guard width != 0 else {
+            appendLog("No tape cassette loaded")
+            return .unprintable
+        }
+        guard let loaded = TapeSize.all.first(where: { $0.widthMM == width }) else {
+            appendLog("Loaded tape is \(width) mm, which LabelBot can't print")
+            return .unprintable
+        }
+        guard loaded != tape else { return .ok }
+
+        if askBeforeSwitching {
+            let alert = NSAlert()
+            alert.messageText = "Tape size doesn't match"
+            alert.informativeText = "The printer has \(loaded.label) tape loaded, but the labels are set up "
+                + "for \(tape.label). Switch to \(loaded.label) and print, or cancel to change the tape?"
+            alert.addButton(withTitle: "Switch to \(loaded.label) and Print")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                appendLog("Print cancelled: loaded tape is \(loaded.label), labels set for \(tape.label)")
+                return .cancelled
+            }
+        }
+        appendLog("Loaded tape is \(loaded.label) — switched from \(tape.label)")
+        tape = loaded
+        return .ok
+    }
+
+    /// Waits for already-queued main-queue log lines so the summary lands after them.
+    private static func flushMainQueue() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 }

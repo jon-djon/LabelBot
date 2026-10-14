@@ -11,6 +11,20 @@ struct LabelSectionEditor: View {
     let category: FastenerCategory
 
     var body: some View {
+        if category.isFastener {
+            fastenerEditor
+        } else {
+            HStack(spacing: 8) {
+                RowLabel("Text")
+                TextField("Label text", text: $section.customText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 280)
+                Spacer()
+            }
+        }
+    }
+
+    private var fastenerEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Top row: entry mode.
             HStack(spacing: 8) {

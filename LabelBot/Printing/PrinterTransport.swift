@@ -19,8 +19,10 @@ nonisolated protocol PrinterTransport: AnyObject, Sendable {
     /// Opens the connection. Throws `TransportError` on failure.
     func connect() throws
 
-    /// Sends the full payload, chunking as needed for the transport.
-    func send(_ data: Data) throws
+    /// Sends the full payload, chunking as needed for the transport. `progress` is
+    /// called synchronously after each chunk with the total bytes sent so far;
+    /// `received` gets any bytes the printer pushes back while the send is running.
+    func send(_ data: Data, progress: (Int) -> Void, received: @escaping @Sendable (Data) -> Void) throws
 
     /// Reads up to `maxLength` bytes of status reply, waiting up to `timeout` seconds.
     /// Returns whatever arrived (possibly empty) rather than throwing on timeout.
@@ -28,6 +30,12 @@ nonisolated protocol PrinterTransport: AnyObject, Sendable {
 
     /// Closes the connection. Safe to call more than once.
     func disconnect()
+}
+
+nonisolated extension PrinterTransport {
+    func send(_ data: Data) throws {
+        try send(data, progress: { _ in }, received: { _ in })
+    }
 }
 
 enum TransportError: LocalizedError {

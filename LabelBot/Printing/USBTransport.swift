@@ -116,11 +116,23 @@ nonisolated final class USBTransport: PrinterTransport, @unchecked Sendable {
     /// printer NAKs input while it physically prints and cuts each label, so a big job
     /// blows past a single timeout mid-print (kIOReturnTimeout) and the trailing bytes —
     /// including the final cut command — never arrive. Sending in chunks lets each
-    /// transfer complete as buffer space frees up. 8 KB = 16 × the 512-byte bulk packet.
-    private static let chunkSize = 8192
+    /// transfer complete as buffer space frees up. 2 KB = 4 × the 512-byte bulk packet;
+    /// small chunks keep any one request from spanning more than one label's print.
+    private static let chunkSize = 2048
 
-    func send(_ data: Data) throws {
+    /// Seconds one chunk may wait for the printer to accept it. The printer only
+    /// takes more data once earlier labels have printed and cut, which at 360 dpi
+    /// (half feed speed) runs well past 15 s for a pair of long labels. Hitting this
+    /// aborts the transfer and leaves the printer waiting mid-label, so it must only
+    /// fire when the printer has genuinely stopped.
+    private static let chunkTimeout: TimeInterval = 90
+
+    func send(_ data: Data, progress: (Int) -> Void, received: @escaping @Sendable (Data) -> Void) throws {
         guard let outPipe else { throw TransportError.notConnected }
+        // Keep the bulk IN pipe drained while sending: any status reply the printer
+        // pushes mid-job must be read, or it stops accepting data part-way through.
+        startDraining(received)
+        defer { stopDraining() }
         var offset = 0
         while offset < data.count {
             let end = min(offset + Self.chunkSize, data.count)
@@ -131,7 +143,7 @@ nonisolated final class USBTransport: PrinterTransport, @unchecked Sendable {
             // Completions fire on the interface's internal queue; block until done.
             // Timeout is per chunk, so total transfer time scales with the batch.
             do {
-                try outPipe.enqueueIORequest(with: chunk, completionTimeout: 15) { status, _ in
+                try outPipe.enqueueIORequest(with: chunk, completionTimeout: Self.chunkTimeout) { status, _ in
                     result = status
                     semaphore.signal()
                 }
@@ -140,10 +152,36 @@ nonisolated final class USBTransport: PrinterTransport, @unchecked Sendable {
             }
             semaphore.wait()
             guard result == kIOReturnSuccess else {
-                throw TransportError.writeFailed("bulk OUT returned \(result) at offset \(offset)")
+                let reason = result == kIOReturnTimeout
+                    ? "printer accepted no data for \(Int(Self.chunkTimeout)) s (kIOReturnTimeout)"
+                    : String(format: "bulk OUT returned 0x%08X", UInt32(bitPattern: result))
+                throw TransportError.writeFailed("\(reason) at offset \(offset)")
             }
             offset = end
+            progress(offset)
         }
+    }
+
+    /// Continuously reads bulk IN data, handing each read to `received`, until
+    /// `stopDraining()`. Each completion re-enqueues the next read; the abort in
+    /// `stopDraining()` ends the loop.
+    private func startDraining(_ received: @escaping @Sendable (Data) -> Void) {
+        guard let inPipe else { return }
+        func enqueueRead() {
+            // Only read in the completion, after the transfer has finished writing it.
+            guard let readBuffer = NSMutableData(length: 64) else { return }
+            nonisolated(unsafe) let buffer = readBuffer
+            try? inPipe.enqueueIORequest(with: buffer, completionTimeout: 0) { status, count in
+                guard status == kIOReturnSuccess else { return }
+                if count > 0 { received(Data(Data(referencing: buffer).prefix(count))) }
+                enqueueRead()
+            }
+        }
+        enqueueRead()
+    }
+
+    private func stopDraining() {
+        try? inPipe?.__abort(with: .synchronous)
     }
 
     func readStatus(maxLength: Int, timeout: TimeInterval) throws -> Data {

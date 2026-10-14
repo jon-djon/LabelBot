@@ -70,7 +70,7 @@ struct ScrewIconGrids: View {
                     Spacer()
                 }
                 Text("Machine screws").font(.caption).foregroundStyle(.secondary)
-                IconRow(options: HeadType.allCases.filter { $0 != .none },
+                IconRow(options: HeadType.machineHeads,
                         image: { h in
                             IconRenderer.swatch(key: "head-\(h.rawValue)-machine-\(printer.current.screwOrientation.rawValue)-\(printer.current.threaded)-\(printer.current.screwLength.rawValue)") {
                                 IconRenderer.drawHead(h, threadKind: .machine, threaded: printer.current.threaded, orientation: printer.current.screwOrientation, length: printer.current.screwLength.factor, into: $0, rect: $1)

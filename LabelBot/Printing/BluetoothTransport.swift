@@ -60,7 +60,8 @@ nonisolated final class BluetoothTransport: NSObject, PrinterTransport, IOBlueto
         self.channel = opened
     }
 
-    func send(_ data: Data) throws {
+    /// Incoming RFCOMM data is buffered for `readStatus`, so `received` is unused here.
+    func send(_ data: Data, progress: (Int) -> Void, received: @escaping @Sendable (Data) -> Void) throws {
         guard let channel else { throw TransportError.notConnected }
         let mtu = Int(channel.getMTU())
         var bytes = [UInt8](data)
@@ -75,6 +76,7 @@ nonisolated final class BluetoothTransport: NSObject, PrinterTransport, IOBlueto
                 throw TransportError.writeFailed("writeSync returned \(result) at offset \(offset)")
             }
             offset += chunk
+            progress(offset)
         }
     }
 
